@@ -1,0 +1,25 @@
+@startuml
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+component Client
+
+package "Système de Disponibilité" {
+    component "Reverse Proxy\n(Load Balancer)" as Proxy
+    component "Serveur Principal" as Primary
+    component "Serveur Secondaire" as Spare
+    component "Surveillance\n(Heartbeat)" as Monitor
+}
+
+Client --> Proxy : HTTP Requests\n/api/data
+
+Proxy --> Primary : Forward requests (normal mode)
+Proxy --> Spare : Forward requests (failover mode)
+
+Monitor --> Primary : /health check périodique
+Monitor --> Proxy : met à jour l'état de santé du serveur
+
+Client --> Primary : /crash (manual stimulus)
+
+@enduml
