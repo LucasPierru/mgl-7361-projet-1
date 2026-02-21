@@ -37,19 +37,27 @@ app.get("/api/data", (req, res) => {
 });
 
 app.post("/crash", (req, res) => {
-  console.log("Primary crashing...");
+  isAvailable = false;
+  console.log(`${SERVER_NAME} set to unavailable`);
   res.json({
     success: true,
-    message: `${SERVER_NAME} is now unavailable`,
+    message: `${SERVER_NAME} is now unavailable (recoverable via /recover)`,
     server: SERVER_NAME,
     port: PORT,
     datetime: new Date().toISOString(),
   });
+});
 
-  // Give response time to flush before exit
-  setTimeout(() => {
-    process.exit(1);
-  }, 100);
+app.post("/unavailable", (req, res) => {
+  isAvailable = false;
+
+  res.json({
+    success: true,
+    message: `${SERVER_NAME} is now unavailable (returns 500 on /api/data)`,
+    server: SERVER_NAME,
+    port: PORT,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post("/recover", (req, res) => {

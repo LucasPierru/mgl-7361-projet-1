@@ -1,10 +1,8 @@
 services:
-  nginx:
-    image: nginx:latest
+  failover:
+    build: ./failover
     ports:
-      - "8080:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - "8080:8080"
     depends_on:
       - primary
       - spare

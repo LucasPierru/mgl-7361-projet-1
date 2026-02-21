@@ -48,10 +48,14 @@
     <script>
       const URL = "http://localhost:8080/api/data";
       const CRASH_URL = "http://localhost:3001/crash";
-
-      const REQUEST_INTERVAL_MS = 200;
-      const TEST_DURATION_MS = 20000;
-      const FAILURE_TRIGGER_DELAY_MS = 5000;
+      const PRIMARY_RECOVER_URL = "http://localhost:3001/recover";
+      const SPARE_RECOVER_URL = "http://localhost:3002/recover";
+      const FAILOVER_RESET_URL = "http://localhost:8080/failover/reset";
+      const MIN_INTERVAL_MS = 100;
+      const MAX_INTERVAL_MS = 300;
+      const REQUESTS_PER_BURST = 3;
+      const TEST_DURATION_MS = 30000;
+      const FAILURE_DELAY_MS = 20000;
 
       const startBtn = document.getElementById("startBtn");
       const stopBtn = document.getElementById("stopBtn");
@@ -65,9 +69,16 @@
       let requestTimer = null;
       let finishTimer = null;
       let crashTimer = null;
+      let isRunning = false;
+      let activeRunId = 0;
+
+      function getNextIntervalMs() {
+        const span = MAX_INTERVAL_MS - MIN_INTERVAL_MS;
+        return MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
+      }
 
       function log(message) {
-        const now = new Date().toISOString();
+        const now = new Date().toTimeString().split(" ")[0];
         logEl.textContent += `[${now}] ${message}\n`;
         logEl.scrollTop = logEl.scrollHeight;
       }
@@ -81,7 +92,7 @@
       }
 
       function stopTimers() {
-        if (requestTimer) clearInterval(requestTimer);
+        if (requestTimer) clearTimeout(requestTimer);
         if (finishTimer) clearTimeout(finishTimer);
         if (crashTimer) clearTimeout(crashTimer);
 
@@ -90,10 +101,14 @@
         crashTimer = null;
       }
 
-      async function sendRequest() {
+      async function sendRequest(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
         const now = Date.now();
         try {
           const res = await fetch(URL);
+          if (!isRunning || runId !== activeRunId) return;
+
           const status = res.status;
           const data = await res.json();
           const serverName = data.server || "unknown";
@@ -116,6 +131,8 @@
 
           log(`Status: ${status}; Server: ${serverName}`);
         } catch (error) {
+          if (!isRunning || runId !== activeRunId) return;
+
           if (!failureTime) {
             failureTime = now;
             log("Failure detected (exception)");
@@ -131,13 +148,72 @@
         }
       }
 
-      async function triggerFailure() {
+      async function sendRequestBurst(runId, count) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        const tasks = Array.from({ length: count }, () => sendRequest(runId));
+        await Promise.allSettled(tasks);
+      }
+
+      function scheduleNextBurst(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        const delay = getNextIntervalMs();
+        requestTimer = setTimeout(async () => {
+          await sendRequestBurst(runId, REQUESTS_PER_BURST);
+          scheduleNextBurst(runId);
+        }, delay);
+      }
+
+      async function triggerFailure(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
         try {
           const res = await fetch(CRASH_URL, { method: "POST" });
+          if (!isRunning || runId !== activeRunId) return;
           log(`Crash triggered on primary, status: ${res.status}`);
         } catch (error) {
+          if (!isRunning || runId !== activeRunId) return;
           log(`Unable to trigger crash: ${error.message}`);
         }
+      }
+
+      async function prepareServers() {
+        const tasks = [
+          fetch(PRIMARY_RECOVER_URL, { method: "POST" }),
+          fetch(SPARE_RECOVER_URL, { method: "POST" }),
+          fetch(FAILOVER_RESET_URL, { method: "POST" }),
+        ];
+
+        const results = await Promise.allSettled(tasks);
+        const failures = results.filter((result) => result.status === "rejected");
+
+        if (failures.length > 0) {
+          log("Warning: could not recover all servers before test start");
+        } else {
+          log("Servers reset to healthy state before test");
+        }
+      }
+
+      async function waitForHealthyStart() {
+        const maxAttempts = 10;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          try {
+            const res = await fetch(URL);
+            if (res.status === 200) {
+              log("Warm-up check passed (200)");
+              return true;
+            }
+          } catch (error) {
+            // Retry until max attempts
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+
+        log("Warning: warm-up check did not get 200 before test start");
+        return false;
       }
 
       function computeResults() {
@@ -165,7 +241,10 @@
         log(`RESULTS -> T_bascule: ${tbasculeText}, E_bascule: ${ebasculeText}`);
       }
 
-      function finishTest() {
+      function finishTest(runId = activeRunId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        isRunning = false;
         stopTimers();
         computeResults();
         statusEl.textContent = "Finished";
@@ -173,21 +252,36 @@
         stopBtn.disabled = true;
       }
 
-      function startTest() {
+      async function startTest() {
+        if (isRunning) return;
+
         stopTimers();
         resetState();
+        await prepareServers();
+        await waitForHealthyStart();
+
+        activeRunId += 1;
+        const runId = activeRunId;
+        isRunning = true;
 
         statusEl.textContent = "Running";
         startBtn.disabled = true;
         stopBtn.disabled = false;
 
-        sendRequest();
-        requestTimer = setInterval(sendRequest, REQUEST_INTERVAL_MS);
-        crashTimer = setTimeout(triggerFailure, FAILURE_TRIGGER_DELAY_MS);
-        finishTimer = setTimeout(finishTest, TEST_DURATION_MS);
+        sendRequestBurst(runId, REQUESTS_PER_BURST);
+        scheduleNextBurst(runId);
+        crashTimer = setTimeout(() => triggerFailure(runId), FAILURE_DELAY_MS);
+        finishTimer = setTimeout(() => finishTest(runId), TEST_DURATION_MS);
+
+        log(
+          `Duration: ${TEST_DURATION_MS / 1000} s, crash after: ${FAILURE_DELAY_MS / 1000} s, Requests sent every ${MIN_INTERVAL_MS}-${MAX_INTERVAL_MS} ms in bursts of ${REQUESTS_PER_BURST}`,
+        );
       }
 
       function stopTest() {
+        if (!isRunning) return;
+
+        isRunning = false;
         stopTimers();
         statusEl.textContent = "Stopped";
         startBtn.disabled = false;
