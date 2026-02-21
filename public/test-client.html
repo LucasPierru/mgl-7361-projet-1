@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Failover Test Client</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+
+      button {
+        padding: 8px 14px;
+        margin-right: 8px;
+      }
+
+      #status {
+        margin-top: 12px;
+        font-weight: bold;
+      }
+
+      #results {
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        border: 1px solid #ccc;
+        padding: 10px;
+        height: 280px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: #fafafa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Failover Test Client</h1>
+
+    <button id="startBtn">Start Test</button>
+    <button id="stopBtn" disabled>Stop</button>
+
+    <div id="status">Idle</div>
+    <div id="results">No results yet.</div>
+    <div id="log"></div>
+
+    <script>
+      const URL = "http://localhost:8080/api/data";
+      const CRASH_URL = "http://localhost:3001/crash";
+
+      const REQUEST_INTERVAL_MS = 200;
+      const TEST_DURATION_MS = 20000;
+      const FAILURE_TRIGGER_DELAY_MS = 5000;
+
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const statusEl = document.getElementById("status");
+      const resultsEl = document.getElementById("results");
+      const logEl = document.getElementById("log");
+
+      let requests = [];
+      let failureTime = null;
+      let firstSuccessAfterFail = null;
+      let requestTimer = null;
+      let finishTimer = null;
+      let crashTimer = null;
+
+      function log(message) {
+        const now = new Date().toISOString();
+        logEl.textContent += `[${now}] ${message}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function resetState() {
+        requests = [];
+        failureTime = null;
+        firstSuccessAfterFail = null;
+        resultsEl.textContent = "Running...";
+        logEl.textContent = "";
+      }
+
+      function stopTimers() {
+        if (requestTimer) clearInterval(requestTimer);
+        if (finishTimer) clearTimeout(finishTimer);
+        if (crashTimer) clearTimeout(crashTimer);
+
+        requestTimer = null;
+        finishTimer = null;
+        crashTimer = null;
+      }
+
+      async function sendRequest() {
+        const now = Date.now();
+        try {
+          const res = await fetch(URL);
+          const status = res.status;
+          const data = await res.json();
+          const serverName = data.server || "unknown";
+
+          if (status !== 200 && !failureTime) {
+            failureTime = now;
+            log(`Failure detected at ${failureTime}`);
+          }
+
+          if (failureTime && status === 200 && !firstSuccessAfterFail) {
+            firstSuccessAfterFail = now;
+            log(`First recovery at ${firstSuccessAfterFail}`);
+          }
+
+          requests.push({
+            time: now,
+            success: status === 200,
+            serverName,
+          });
+
+          log(`Status: ${status}; Server: ${serverName}`);
+        } catch (error) {
+          if (!failureTime) {
+            failureTime = now;
+            log("Failure detected (exception)");
+          }
+
+          requests.push({
+            time: now,
+            success: false,
+            serverName: "unknown",
+          });
+
+          log(`ERROR: ${error.message}`);
+        }
+      }
+
+      async function triggerFailure() {
+        try {
+          const res = await fetch(CRASH_URL, { method: "POST" });
+          log(`Crash triggered on primary, status: ${res.status}`);
+        } catch (error) {
+          log(`Unable to trigger crash: ${error.message}`);
+        }
+      }
+
+      function computeResults() {
+        let tbasculeText = "n/a";
+        let ebasculeText = "n/a";
+
+        if (failureTime && firstSuccessAfterFail) {
+          const tBascule = (firstSuccessAfterFail - failureTime) / 1000;
+          tbasculeText = `${tBascule.toFixed(2)} s`;
+        }
+
+        if (failureTime) {
+          const windowStart = failureTime - 2000;
+          const windowEnd = failureTime + 10000;
+
+          const windowRequests = requests.filter((r) => r.time >= windowStart && r.time <= windowEnd);
+          if (windowRequests.length > 0) {
+            const errors = windowRequests.filter((r) => !r.success);
+            const errorRate = (errors.length / windowRequests.length) * 100;
+            ebasculeText = `${errorRate.toFixed(2)} %`;
+          }
+        }
+
+        resultsEl.textContent = `T_bascule: ${tbasculeText} | E_bascule: ${ebasculeText}`;
+        log(`RESULTS -> T_bascule: ${tbasculeText}, E_bascule: ${ebasculeText}`);
+      }
+
+      function finishTest() {
+        stopTimers();
+        computeResults();
+        statusEl.textContent = "Finished";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+
+      function startTest() {
+        stopTimers();
+        resetState();
+
+        statusEl.textContent = "Running";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        sendRequest();
+        requestTimer = setInterval(sendRequest, REQUEST_INTERVAL_MS);
+        crashTimer = setTimeout(triggerFailure, FAILURE_TRIGGER_DELAY_MS);
+        finishTimer = setTimeout(finishTest, TEST_DURATION_MS);
+      }
+
+      function stopTest() {
+        stopTimers();
+        statusEl.textContent = "Stopped";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        computeResults();
+      }
+
+      startBtn.addEventListener("click", startTest);
+      stopBtn.addEventListener("click", stopTest);
+    </script>
+  </body>
+</html>
