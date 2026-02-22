@@ -5,98 +5,614 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Failover Test Client</title>
     <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #f5f5f5;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+      }
+
+      h1 {
+        font-size: 28px;
+        margin-bottom: 8px;
+      }
+
+      .subtitle {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+
+      .tabs {
+        display: flex;
+        background: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+      }
+
+      .tab {
+        padding: 16px 32px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        font-size: 15px;
+        font-weight: 500;
+        color: #6c757d;
+        transition: all 0.2s;
+        border-bottom: 3px solid transparent;
+      }
+
+      .tab:hover {
+        color: #495057;
+        background: rgba(0, 0, 0, 0.02);
+      }
+
+      .tab.active {
+        color: #667eea;
+        border-bottom-color: #667eea;
+        background: white;
+      }
+
+      .tab-content {
+        display: none;
+        padding: 30px;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      /* API Explorer Styles */
+      .endpoint {
+        margin-bottom: 16px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .endpoint-header {
+        display: flex;
+        align-items: center;
+        padding: 16px;
+        background: #f8f9fa;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .endpoint-header:hover {
+        background: #e9ecef;
+      }
+
+      .method {
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 12px;
+        margin-right: 12px;
+      }
+
+      .method.get {
+        background: #d1ecf1;
+        color: #0c5460;
+      }
+
+      .method.post {
+        background: #d4edda;
+        color: #155724;
+      }
+
+      .endpoint-path {
+        font-family: "Courier New", monospace;
+        font-size: 14px;
+        flex: 1;
+      }
+
+      .endpoint-body {
+        padding: 16px;
+        border-top: 1px solid #dee2e6;
+        background: white;
+      }
+
+      .endpoint-body.hidden {
+        display: none;
+      }
+
+      .endpoint-description {
+        color: #6c757d;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+
+      .form-group {
+        margin-bottom: 16px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 500;
+        font-size: 14px;
+        color: #495057;
+      }
+
+      .form-group input,
+      .form-group select {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 14px;
       }
 
       button {
-        padding: 8px 14px;
-        margin-right: 8px;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
       }
 
-      #status {
-        margin-top: 12px;
-        font-weight: bold;
+      .btn-primary {
+        background: #667eea;
+        color: white;
       }
 
-      #results {
-        margin-top: 12px;
+      .btn-primary:hover {
+        background: #5568d3;
       }
 
-      #log {
-        margin-top: 12px;
-        border: 1px solid #ccc;
-        padding: 10px;
-        height: 280px;
-        overflow: auto;
+      .btn-secondary {
+        background: #6c757d;
+        color: white;
+      }
+
+      .btn-secondary:hover {
+        background: #5a6268;
+      }
+
+      .btn-success {
+        background: #28a745;
+        color: white;
+      }
+
+      .btn-success:hover {
+        background: #218838;
+      }
+
+      .btn-danger {
+        background: #dc3545;
+        color: white;
+      }
+
+      .btn-danger:hover {
+        background: #c82333;
+      }
+
+      .btn-small {
+        padding: 6px 14px;
+        font-size: 13px;
+      }
+
+      .response-area {
+        margin-top: 16px;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+      }
+
+      .response-area pre {
+        margin: 0;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
         white-space: pre-wrap;
-        background: #fafafa;
+        word-wrap: break-word;
+      }
+
+      /* Load Test Styles */
+      .test-controls {
+        margin-bottom: 24px;
+      }
+
+      .test-controls button {
+        margin-right: 12px;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-weight: 500;
+        margin: 12px 0;
+      }
+
+      .status-idle {
+        background: #e9ecef;
+        color: #495057;
+      }
+
+      .status-running {
+        background: #d1ecf1;
+        color: #0c5460;
+      }
+
+      .status-finished {
+        background: #d4edda;
+        color: #155724;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin: 24px 0;
+      }
+
+      .metric-card {
+        padding: 16px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        background: #f8f9fa;
+      }
+
+      .metric-label {
+        font-size: 12px;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+
+      .metric-value {
+        font-size: 24px;
+        font-weight: 600;
+        color: #495057;
+      }
+
+      .log-box {
+        margin-top: 24px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        background: #f8f9fa;
+        padding: 16px;
+        height: 300px;
+        overflow-y: auto;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .log-entry {
+        margin: 4px 0;
+      }
+
+      .log-success {
+        color: #28a745;
+      }
+
+      .log-error {
+        color: #dc3545;
+      }
+
+      .log-warning {
+        color: #ffc107;
+      }
+
+      .log-info {
+        color: #17a2b8;
       }
     </style>
   </head>
   <body>
-    <h1>Failover Test Client</h1>
+    <div class="container">
+      <header>
+        <h1>Failover Test Client</h1>
+        <div class="subtitle">MGL7361 - Availability Tactics Demo</div>
+      </header>
 
-    <button id="startBtn">Start Test</button>
-    <button id="stopBtn" disabled>Stop</button>
+      <div class="tabs">
+        <button class="tab active" data-tab="explorer">API Explorer</button>
+        <button class="tab" data-tab="loadtest">Load Test</button>
+      </div>
 
-    <div id="status">Idle</div>
-    <div id="results">No results yet.</div>
-    <div id="log"></div>
+      <!-- API Explorer Tab -->
+      <div id="explorer" class="tab-content active">
+        <h2 style="margin-bottom: 20px;">Proxy Endpoints</h2>
+
+        <!-- GET /api -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('api')">
+            <span class="method get">GET</span>
+            <span class="endpoint-path">/api</span>
+          </div>
+          <div id="api-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Main API endpoint - routes to primary or spare server</div>
+            <button class="btn-primary btn-small" onclick="testGetApi()">Send Request</button>
+            <div id="api-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- GET /metrics -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('metrics')">
+            <span class="method get">GET</span>
+            <span class="endpoint-path">/metrics</span>
+          </div>
+          <div id="metrics-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Get T_bascule and E_bascule metrics</div>
+            <button class="btn-primary btn-small" onclick="testGetMetrics()">Send Request</button>
+            <div id="metrics-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- GET /status -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('status')">
+            <span class="method get">GET</span>
+            <span class="endpoint-path">/status</span>
+          </div>
+          <div id="status-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Get current proxy status and health monitoring state</div>
+            <button class="btn-primary btn-small" onclick="testGetStatus()">Send Request</button>
+            <div id="status-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- GET /logs -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('logs')">
+            <span class="method get">GET</span>
+            <span class="endpoint-path">/logs?limit=N</span>
+          </div>
+          <div id="logs-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Get recent request logs</div>
+            <div class="form-group">
+              <label>Limit</label>
+              <input type="number" id="logs-limit" value="50" min="1" max="1000" />
+            </div>
+            <button class="btn-primary btn-small" onclick="testGetLogs()">Send Request</button>
+            <div id="logs-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- POST /inject-failure -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('inject')">
+            <span class="method post">POST</span>
+            <span class="endpoint-path">/inject-failure</span>
+          </div>
+          <div id="inject-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Trigger a failure on the primary server</div>
+            <div class="form-group">
+              <label>Failure Mode</label>
+              <select id="failure-mode">
+                <option value="timeout">timeout - Server doesn't respond</option>
+                <option value="error">error - Server returns 500</option>
+                <option value="crash">crash - Server process exits</option>
+              </select>
+            </div>
+            <button class="btn-danger btn-small" onclick="testInjectFailure()">Inject Failure</button>
+            <div id="inject-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- POST /recover-primary -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('recover')">
+            <span class="method post">POST</span>
+            <span class="endpoint-path">/recover-primary</span>
+          </div>
+          <div id="recover-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Recover the primary server from failure mode</div>
+            <button class="btn-success btn-small" onclick="testRecoverPrimary()">Recover Primary</button>
+            <div id="recover-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Load Test Tab -->
+      <div id="loadtest" class="tab-content">
+        <h2 style="margin-bottom: 20px;">Automated Load Test</h2>
+
+        <div class="test-controls">
+          <button id="startBtn" class="btn-success" onclick="startTest()">Start Test</button>
+          <button id="stopBtn" class="btn-danger" onclick="stopTest()" disabled>Stop Test</button>
+        </div>
+
+        <div id="test-status" class="status-badge status-idle">Idle</div>
+
+        <div class="metrics">
+          <div class="metric-card">
+            <div class="metric-label">T_bascule</div>
+            <div id="metric-tbascule" class="metric-value">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">E_bascule</div>
+            <div id="metric-ebascule" class="metric-value">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total Requests</div>
+            <div id="metric-total" class="metric-value">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Success Rate</div>
+            <div id="metric-success" class="metric-value">-</div>
+          </div>
+        </div>
+
+        <div class="log-box" id="test-log"></div>
+      </div>
+    </div>
 
     <script>
-      const URL = "http://localhost:3000/api";
-      const INJECT_FAILURE_URL = "http://localhost:3000/inject-failure";
-      const RECOVER_PRIMARY_URL = "http://localhost:3000/recover-primary";
-      const MIN_INTERVAL_MS = 100;
-      const MAX_INTERVAL_MS = 300;
-      const REQUESTS_PER_BURST = 3;
-      const TEST_DURATION_MS = 30000;
-      const FAILURE_DELAY_MS = 20000;
+      const BASE_URL = "http://localhost:3000";
 
-      const startBtn = document.getElementById("startBtn");
-      const stopBtn = document.getElementById("stopBtn");
-      const statusEl = document.getElementById("status");
-      const resultsEl = document.getElementById("results");
-      const logEl = document.getElementById("log");
+      // Tab switching
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const tabName = tab.dataset.tab;
+          document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+          document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById(tabName).classList.add("active");
+        });
+      });
 
+      // Endpoint toggle
+      function toggleEndpoint(id) {
+        const body = document.getElementById(`${id}-body`);
+        body.classList.toggle("hidden");
+      }
+
+      // Display response
+      function displayResponse(elementId, data, status) {
+        const element = document.getElementById(`${elementId}-response`);
+        element.style.display = "block";
+        const statusColor = status >= 200 && status < 300 ? "#28a745" : "#dc3545";
+        element.innerHTML = `
+          <div style="margin-bottom: 8px; color: ${statusColor}; font-weight: 600;">
+            Status: ${status}
+          </div>
+          <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+      }
+
+      // API Explorer functions
+      async function testGetApi() {
+        try {
+          const res = await fetch(`${BASE_URL}/api`);
+          const data = await res.json();
+          displayResponse("api", data, res.status);
+        } catch (error) {
+          displayResponse("api", { error: error.message }, 0);
+        }
+      }
+
+      async function testGetMetrics() {
+        try {
+          const res = await fetch(`${BASE_URL}/metrics`);
+          const data = await res.json();
+          displayResponse("metrics", data, res.status);
+        } catch (error) {
+          displayResponse("metrics", { error: error.message }, 0);
+        }
+      }
+
+      async function testGetStatus() {
+        try {
+          const res = await fetch(`${BASE_URL}/status`);
+          const data = await res.json();
+          displayResponse("status", data, res.status);
+        } catch (error) {
+          displayResponse("status", { error: error.message }, 0);
+        }
+      }
+
+      async function testGetLogs() {
+        try {
+          const limit = document.getElementById("logs-limit").value;
+          const res = await fetch(`${BASE_URL}/logs?limit=${limit}`);
+          const data = await res.json();
+          displayResponse("logs", data, res.status);
+        } catch (error) {
+          displayResponse("logs", { error: error.message }, 0);
+        }
+      }
+
+      async function testInjectFailure() {
+        try {
+          const mode = document.getElementById("failure-mode").value;
+          const res = await fetch(`${BASE_URL}/inject-failure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode }),
+          });
+          const data = await res.json();
+          displayResponse("inject", data, res.status);
+        } catch (error) {
+          displayResponse("inject", { error: error.message }, 0);
+        }
+      }
+
+      async function testRecoverPrimary() {
+        try {
+          const res = await fetch(`${BASE_URL}/recover-primary`, {
+            method: "POST",
+          });
+          const data = await res.json();
+          displayResponse("recover", data, res.status);
+        } catch (error) {
+          displayResponse("recover", { error: error.message }, 0);
+        }
+      }
+
+      // Load Test functionality
+      let isRunning = false;
+      let activeRunId = 0;
       let requests = [];
       let failureTime = null;
       let firstSuccessAfterFail = null;
       let requestTimer = null;
       let finishTimer = null;
       let crashTimer = null;
-      let isRunning = false;
-      let activeRunId = 0;
 
-      function getNextIntervalMs() {
-        const span = MAX_INTERVAL_MS - MIN_INTERVAL_MS;
-        return MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
-      }
+      const MIN_INTERVAL_MS = 100;
+      const MAX_INTERVAL_MS = 300;
+      const REQUESTS_PER_BURST = 3;
+      const TEST_DURATION_MS = 30000;
+      const FAILURE_DELAY_MS = 20000;
 
-      function log(message) {
+      function log(message, type = "info") {
+        const logEl = document.getElementById("test-log");
         const now = new Date().toTimeString().split(" ")[0];
-        logEl.textContent += `[${now}] ${message}\n`;
+        const className = `log-${type}`;
+        logEl.innerHTML += `<div class="log-entry ${className}">[${now}] ${message}</div>`;
         logEl.scrollTop = logEl.scrollHeight;
       }
 
-      function resetState() {
-        requests = [];
-        failureTime = null;
-        firstSuccessAfterFail = null;
-        resultsEl.textContent = "Running...";
-        logEl.textContent = "";
-      }
+      function updateMetrics() {
+        document.getElementById("metric-total").textContent = requests.length;
 
-      function stopTimers() {
-        if (requestTimer) clearTimeout(requestTimer);
-        if (finishTimer) clearTimeout(finishTimer);
-        if (crashTimer) clearTimeout(crashTimer);
+        if (failureTime && firstSuccessAfterFail) {
+          const tBascule = firstSuccessAfterFail - failureTime;
+          document.getElementById("metric-tbascule").textContent = `${tBascule} ms`;
+        }
 
-        requestTimer = null;
-        finishTimer = null;
-        crashTimer = null;
+        if (failureTime) {
+          const windowStart = failureTime - 2000;
+          const windowEnd = failureTime + 10000;
+          const windowRequests = requests.filter((r) => r.time >= windowStart && r.time <= windowEnd);
+
+          if (windowRequests.length > 0) {
+            const errors = windowRequests.filter((r) => !r.success);
+            const errorRate = ((errors.length / windowRequests.length) * 100).toFixed(2);
+            document.getElementById("metric-ebascule").textContent = `${errorRate}%`;
+          }
+        }
+
+        const successful = requests.filter((r) => r.success).length;
+        const successRate = requests.length > 0 ? ((successful / requests.length) * 100).toFixed(2) : "0.00";
+        document.getElementById("metric-success").textContent = `${successRate}%`;
       }
 
       async function sendRequest(runId) {
@@ -104,59 +620,49 @@
 
         const now = Date.now();
         try {
-          const res = await fetch(URL);
-          if (!isRunning || runId !== activeRunId) return;
-
+          const res = await fetch(`${BASE_URL}/api`);
           const status = res.status;
           const data = await res.json();
           const serverName = data.node || "unknown";
 
           if (status !== 200 && !failureTime) {
             failureTime = now;
-            log(`Failure detected at ${failureTime}`);
+            log(`Failure detected at ${failureTime}`, "warning");
           }
 
           if (failureTime && status === 200 && !firstSuccessAfterFail) {
             firstSuccessAfterFail = now;
-            log(`First recovery at ${firstSuccessAfterFail}`);
+            log(`First recovery at ${firstSuccessAfterFail}`, "success");
           }
 
-          requests.push({
-            time: now,
-            success: status === 200,
-            serverName,
-          });
+          requests.push({ time: now, success: status === 200, serverName });
 
-          log(`Status: ${status}; Server: ${serverName}`);
+          if (status === 200) {
+            log(`✓ ${status} from ${serverName}`, "success");
+          } else {
+            log(`✗ ${status} from ${serverName}`, "error");
+          }
         } catch (error) {
-          if (!isRunning || runId !== activeRunId) return;
-
           if (!failureTime) {
             failureTime = now;
-            log("Failure detected (exception)");
+            log("Failure detected (exception)", "warning");
           }
-
-          requests.push({
-            time: now,
-            success: false,
-            serverName: "unknown",
-          });
-
-          log(`ERROR: ${error.message}`);
+          requests.push({ time: now, success: false, serverName: "unknown" });
+          log(`✗ ERROR: ${error.message}`, "error");
         }
+
+        updateMetrics();
       }
 
       async function sendRequestBurst(runId, count) {
         if (!isRunning || runId !== activeRunId) return;
-
         const tasks = Array.from({ length: count }, () => sendRequest(runId));
         await Promise.allSettled(tasks);
       }
 
       function scheduleNextBurst(runId) {
         if (!isRunning || runId !== activeRunId) return;
-
-        const delay = getNextIntervalMs();
+        const delay = MIN_INTERVAL_MS + Math.floor(Math.random() * (MAX_INTERVAL_MS - MIN_INTERVAL_MS + 1));
         requestTimer = setTimeout(async () => {
           await sendRequestBurst(runId, REQUESTS_PER_BURST);
           scheduleNextBurst(runId);
@@ -167,129 +673,84 @@
         if (!isRunning || runId !== activeRunId) return;
 
         try {
-          const res = await fetch(INJECT_FAILURE_URL, {
+          const res = await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mode: "timeout" }),
           });
-          if (!isRunning || runId !== activeRunId) return;
-          const data = await res.json();
-          log(`Failure injected on primary (timeout mode), status: ${res.status}`);
+          log(`💥 Failure injected on primary (timeout mode)`, "warning");
         } catch (error) {
-          if (!isRunning || runId !== activeRunId) return;
-          log(`Unable to inject failure: ${error.message}`);
+          log(`Unable to inject failure: ${error.message}`, "error");
         }
       }
 
       async function prepareServers() {
         try {
-          const res = await fetch(RECOVER_PRIMARY_URL, { method: "POST" });
+          const res = await fetch(`${BASE_URL}/recover-primary`, { method: "POST" });
           if (res.ok) {
-            log("Primary server recovered before test");
-          } else {
-            log("Warning: could not recover primary before test start");
+            log("Primary server recovered before test", "info");
           }
         } catch (error) {
-          log("Warning: could not contact proxy to recover primary");
+          log("Warning: could not contact proxy", "warning");
         }
       }
 
-      async function waitForHealthyStart() {
-        const maxAttempts = 10;
-
-        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-          try {
-            const res = await fetch(URL);
-            if (res.status === 200) {
-              log("Warm-up check passed (200)");
-              return true;
-            }
-          } catch (error) {
-            // Retry until max attempts
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-
-        log("Warning: warm-up check did not get 200 before test start");
-        return false;
+      function stopTimers() {
+        if (requestTimer) clearTimeout(requestTimer);
+        if (finishTimer) clearTimeout(finishTimer);
+        if (crashTimer) clearTimeout(crashTimer);
+        requestTimer = null;
+        finishTimer = null;
+        crashTimer = null;
       }
 
-      function computeResults() {
-        let tbasculeText = "n/a";
-        let ebasculeText = "n/a";
-
-        if (failureTime && firstSuccessAfterFail) {
-          const tBascule = (firstSuccessAfterFail - failureTime) / 1000;
-          tbasculeText = `${tBascule.toFixed(2)} s`;
-        }
-
-        if (failureTime) {
-          const windowStart = failureTime - 2000;
-          const windowEnd = failureTime + 10000;
-
-          const windowRequests = requests.filter((r) => r.time >= windowStart && r.time <= windowEnd);
-          if (windowRequests.length > 0) {
-            const errors = windowRequests.filter((r) => !r.success);
-            const errorRate = (errors.length / windowRequests.length) * 100;
-            ebasculeText = `${errorRate.toFixed(2)} %`;
-          }
-        }
-
-        resultsEl.textContent = `T_bascule: ${tbasculeText} | E_bascule: ${ebasculeText}`;
-        log(`RESULTS -> T_bascule: ${tbasculeText}, E_bascule: ${ebasculeText}`);
-      }
-
-      function finishTest(runId = activeRunId) {
-        if (!isRunning || runId !== activeRunId) return;
-
+      function finishTest() {
+        if (!isRunning) return;
         isRunning = false;
         stopTimers();
-        computeResults();
-        statusEl.textContent = "Finished";
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
+        updateMetrics();
+        document.getElementById("test-status").className = "status-badge status-finished";
+        document.getElementById("test-status").textContent = "Finished";
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("stopBtn").disabled = true;
+        log("Test completed", "success");
       }
 
       async function startTest() {
         if (isRunning) return;
 
         stopTimers();
-        resetState();
+        requests = [];
+        failureTime = null;
+        firstSuccessAfterFail = null;
+        document.getElementById("test-log").innerHTML = "";
+        document.getElementById("metric-tbascule").textContent = "-";
+        document.getElementById("metric-ebascule").textContent = "-";
+
         await prepareServers();
-        await waitForHealthyStart();
 
         activeRunId += 1;
         const runId = activeRunId;
         isRunning = true;
 
-        statusEl.textContent = "Running";
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
+        document.getElementById("test-status").className = "status-badge status-running";
+        document.getElementById("test-status").textContent = "Running";
+        document.getElementById("startBtn").disabled = true;
+        document.getElementById("stopBtn").disabled = false;
+
+        log(`Test started: ${TEST_DURATION_MS / 1000}s duration, failure at ${FAILURE_DELAY_MS / 1000}s`, "info");
 
         sendRequestBurst(runId, REQUESTS_PER_BURST);
         scheduleNextBurst(runId);
         crashTimer = setTimeout(() => triggerFailure(runId), FAILURE_DELAY_MS);
-        finishTimer = setTimeout(() => finishTest(runId), TEST_DURATION_MS);
-
-        log(
-          `Duration: ${TEST_DURATION_MS / 1000} s, crash after: ${FAILURE_DELAY_MS / 1000} s, Requests sent every ${MIN_INTERVAL_MS}-${MAX_INTERVAL_MS} ms in bursts of ${REQUESTS_PER_BURST}`,
-        );
+        finishTimer = setTimeout(() => finishTest(), TEST_DURATION_MS);
       }
 
       function stopTest() {
         if (!isRunning) return;
-
-        isRunning = false;
-        stopTimers();
-        statusEl.textContent = "Stopped";
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        computeResults();
+        finishTest();
+        log("Test stopped by user", "warning");
       }
-
-      startBtn.addEventListener("click", startTest);
-      stopBtn.addEventListener("click", stopTest);
     </script>
   </body>
 </html>
