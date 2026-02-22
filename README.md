@@ -75,19 +75,6 @@ Le système utilise une approche de **monitoring passif** où le service primair
 | **SPARE** | 3002 | Service de secours | Toujours disponible (warm spare) |
 | **PROXY** | 3000 | Point d'entrée | Réception heartbeat + routage + métriques + UI |
 
-### Flux de communication
-
-```
-PRIMARY (3001)  ----[heartbeat POST toutes les 1s]----> PROXY (3000)
-                                                            |
-                                                            | [route selon état]
-                                                            |
-                                                            v
-Client --------[GET /api]-------> PROXY --------> PRIMARY ou SPARE
-                                    |
-                                    |----[après 4s sans heartbeat]----> SPARE (3002)
-```
-
 ---
 
 ## Prérequis
@@ -123,8 +110,6 @@ npm install
 
 ## Démarrage du système
 
-### Méthode 1 : Trois terminaux (Recommandé)
-
 **Terminal 1 - PRIMARY**
 ```bash
 npm run dev:primary
@@ -139,37 +124,6 @@ npm run dev:spare
 ```bash
 npm run dev:proxy
 ```
-
-### Méthode 2 : Scripts individuels
-
-```bash
-# Terminal 1
-node primary/server.js
-
-# Terminal 2
-node spare/server.js
-
-# Terminal 3
-node proxy/server.js
-```
-
-### Vérification
-
-Une fois les 3 services lancés :
-
-1. **Observer les heartbeats dans le terminal du proxy**
-   - Vous devriez voir : `[proxy] Received heartbeat from primary at timestamp X`
-   - Ces logs apparaissent toutes les secondes
-
-2. **Tester une requête**
-   ```bash
-   curl http://localhost:3000/api
-   # Réponse : { "node": "primary", "ok": true, ... }
-   ```
-
-3. **Accéder à l'interface web**
-   - Ouvrir http://localhost:3000/test-client.html dans votre navigateur
-   - Interface avec 2 onglets : API Explorer et Load Test
 
 ---
 
@@ -194,8 +148,8 @@ Le projet offre deux méthodes de test complémentaires :
 - **Test automatisé de 30 secondes** avec interface visuelle
 - **Configuration :**
   - 25 requêtes/seconde (5 requêtes par burst, intervalles de 100-300ms)
-  - Injection de panne à 20 secondes (configurable)
-  - Bouton "Inject Failure" pour déclencher manuellement la panne
+  - Injection de panne **manuelle uniquement** via bouton "Inject Failure"
+  - Sans injection manuelle, le test s'exécute pendant 30s sans panne
 - **Affichage en temps réel :**
   - Logs du proxy (polling toutes les 500ms)
   - Vue en direct de chaque requête (status, backend, latency)
@@ -276,7 +230,7 @@ Check detailed metrics at: http://localhost:3000/metrics
 
 | Aspect | UI (test-client.html) | Script (spam.js) |
 |--------|----------------------|------------------|
-| **Injection** | Manuelle ou automatique (20s) | Automatique (10s) |
+| **Injection** | Manuelle uniquement | Automatique (10s) |
 | **Visualisation** | Logs en temps réel | Logs textuels dans terminal |
 | **Métriques** | Depuis proxy uniquement | Calculées localement + proxy |
 | **Contrôle** | Boutons interactifs | Automatisé |

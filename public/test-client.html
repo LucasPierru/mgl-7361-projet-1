@@ -553,7 +553,6 @@
       let activeRunId = 0;
       let requestTimer = null;
       let finishTimer = null;
-      let crashTimer = null;
       let logPollingTimer = null;
       let displayedLogCount = 0;
 
@@ -561,7 +560,6 @@
       const MAX_INTERVAL_MS = 300;
       const REQUESTS_PER_BURST = 5;     // 5 for 25 req/sec
       const TEST_DURATION_MS = 30000;
-      const FAILURE_DELAY_MS = 20000;
       const LOG_POLLING_INTERVAL_MS = 500;
 
       function appendNewProxyLogs(logs) {
@@ -654,23 +652,15 @@
       async function manualInjectFailure() {
         if (!isRunning) return;
 
-        // Cancel the automatic failure timer since we're injecting manually
-        if (crashTimer) {
-          clearTimeout(crashTimer);
-          crashTimer = null;
-        }
-
         await triggerFailure(activeRunId);
       }
 
       function stopTimers() {
         if (requestTimer) clearTimeout(requestTimer);
         if (finishTimer) clearTimeout(finishTimer);
-        if (crashTimer) clearTimeout(crashTimer);
         if (logPollingTimer) clearInterval(logPollingTimer);
         requestTimer = null;
         finishTimer = null;
-        crashTimer = null;
         logPollingTimer = null;
       }
 
@@ -747,7 +737,6 @@
 
         sendRequestBurst(runId, REQUESTS_PER_BURST);
         scheduleNextBurst(runId);
-        crashTimer = setTimeout(() => triggerFailure(runId), FAILURE_DELAY_MS);
         finishTimer = setTimeout(() => finishTest(), TEST_DURATION_MS);
       }
 
