@@ -53,6 +53,14 @@ Le système utilise une approche de **monitoring passif** où le service primair
 - Si aucun heartbeat n'a été reçu pendant **4 secondes** (4 heartbeats manqués), le primary est considéré **DOWN**
 - Formule : `primaryHealthy = (now - lastHeartbeat) <= 4000ms`
 
+**Pourquoi attendre 4 secondes (4 heartbeats manqués)?**
+
+Le délai de 4 secondes est un **compromis entre réactivité et fiabilité** :
+- **Éviter les faux positifs** : Un seul heartbeat manqué peut être dû à un retard réseau temporaire, une latence momentanée, ou une brève surcharge CPU
+- **Confirmer la panne** : Attendre 4 heartbeats consécutifs manqués permet de s'assurer que le service est **vraiment DOWN** et pas juste ralenti
+- **Trade-off** : Plus le délai est court, plus la détection est rapide, mais plus le risque de faux positifs augmente
+- **Cas d'usage** : En production, ce paramètre est ajustable selon les besoins (tolérance aux pannes vs. tolérance aux bascules inutiles)
+
 **Phase 4 : Bascule automatique**
 - Dès que le primary est marqué DOWN, toutes les nouvelles requêtes sont automatiquement routées vers le **SPARE**
 - La bascule est transparente pour les clients
