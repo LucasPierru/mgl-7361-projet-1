@@ -442,26 +442,38 @@
 
         <div id="test-status" class="status-badge status-idle">Idle</div>
 
-        <div class="metrics">
-          <div class="metric-card">
-            <div class="metric-label">T_bascule</div>
-            <div id="metric-tbascule" class="metric-value">-</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">E_bascule</div>
-            <div id="metric-ebascule" class="metric-value">-</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Total Requests</div>
-            <div id="metric-total" class="metric-value">0</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Success Rate</div>
-            <div id="metric-success" class="metric-value">-</div>
+        <h3 style="margin-top: 24px; margin-bottom: 12px;">Proxy Logs</h3>
+        <div class="log-box" id="test-log"></div>
+
+        <div id="metrics-section" style="display: none; margin-top: 24px;">
+          <h3 style="margin-bottom: 12px;">Test Results</h3>
+          <div class="metrics">
+            <div class="metric-card">
+              <div class="metric-label">T_bascule</div>
+              <div id="metric-tbascule" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">E_bascule</div>
+              <div id="metric-ebascule" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Requests</div>
+              <div id="metric-total" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Primary Healthy</div>
+              <div id="metric-healthy" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Failed Requests</div>
+              <div id="metric-failed" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Window Requests</div>
+              <div id="metric-window" class="metric-value">-</div>
+            </div>
           </div>
         </div>
-
-        <div class="log-box" id="test-log"></div>
       </div>
     </div>
 
@@ -570,89 +582,70 @@
       // Load Test functionality
       let isRunning = false;
       let activeRunId = 0;
-      let requests = [];
-      let failureTime = null;
-      let firstSuccessAfterFail = null;
       let requestTimer = null;
       let finishTimer = null;
       let crashTimer = null;
+      let logPollingTimer = null;
+      let lastLogCount = 0;
 
       const MIN_INTERVAL_MS = 100;
       const MAX_INTERVAL_MS = 300;
-      const REQUESTS_PER_BURST = 5;     // 3 → 5 for 25 req/sec
+      const REQUESTS_PER_BURST = 5;     // 5 for 25 req/sec
       const TEST_DURATION_MS = 30000;
       const FAILURE_DELAY_MS = 20000;
+      const LOG_POLLING_INTERVAL_MS = 500;
 
-      function log(message, type = "info") {
+      function displayProxyLogs(logs) {
         const logEl = document.getElementById("test-log");
-        const now = new Date().toTimeString().split(" ")[0];
-        const className = `log-${type}`;
-        logEl.innerHTML += `<div class="log-entry ${className}">[${now}] ${message}</div>`;
+        logEl.innerHTML = "";
+
+        logs.forEach((entry) => {
+          const backend = entry.backend || "unknown";
+          const status = entry.status;
+          const latency = entry.latencyMs || 0;
+
+          let className = "log-info";
+          let symbol = "→";
+
+          if (status === 200) {
+            className = "log-success";
+            symbol = "✓";
+          } else if (status >= 500 || status === "timeout") {
+            className = "log-error";
+            symbol = "✗";
+          }
+
+          const message = `${symbol} ${status} from ${backend} (${latency}ms)`;
+          logEl.innerHTML += `<div class="log-entry ${className}">${message}</div>`;
+        });
+
         logEl.scrollTop = logEl.scrollHeight;
       }
 
-      function updateMetrics() {
-        document.getElementById("metric-total").textContent = requests.length;
+      async function pollProxyLogs() {
+        if (!isRunning) return;
 
-        if (failureTime && firstSuccessAfterFail) {
-          const tBascule = firstSuccessAfterFail - failureTime;
-          document.getElementById("metric-tbascule").textContent = `${tBascule} ms`;
-        }
+        try {
+          const res = await fetch(`${BASE_URL}/logs?limit=100`);
+          const data = await res.json();
 
-        if (failureTime) {
-          const windowStart = failureTime - 2000;
-          const windowEnd = failureTime + 10000;
-          const windowRequests = requests.filter((r) => r.time >= windowStart && r.time <= windowEnd);
-
-          if (windowRequests.length > 0) {
-            const errors = windowRequests.filter((r) => !r.success);
-            const errorRate = ((errors.length / windowRequests.length) * 100).toFixed(2);
-            document.getElementById("metric-ebascule").textContent = `${errorRate}%`;
+          if (data.logs && data.logs.length > lastLogCount) {
+            displayProxyLogs(data.logs);
+            lastLogCount = data.logs.length;
           }
+        } catch (error) {
+          console.error("Failed to poll logs:", error);
         }
-
-        const successful = requests.filter((r) => r.success).length;
-        const successRate = requests.length > 0 ? ((successful / requests.length) * 100).toFixed(2) : "0.00";
-        document.getElementById("metric-success").textContent = `${successRate}%`;
       }
 
       async function sendRequest(runId) {
         if (!isRunning || runId !== activeRunId) return;
 
-        const now = Date.now();
         try {
-          const res = await fetch(`${BASE_URL}/api`);
-          const status = res.status;
-          const data = await res.json();
-          const serverName = data.node || "unknown";
-
-          if (status !== 200 && !failureTime) {
-            failureTime = now;
-            log(`Failure detected at ${failureTime}`, "warning");
-          }
-
-          if (failureTime && status === 200 && !firstSuccessAfterFail) {
-            firstSuccessAfterFail = now;
-            log(`First recovery at ${firstSuccessAfterFail}`, "success");
-          }
-
-          requests.push({ time: now, success: status === 200, serverName });
-
-          if (status === 200) {
-            log(`✓ ${status} from ${serverName}`, "success");
-          } else {
-            log(`✗ ${status} from ${serverName}`, "error");
-          }
+          await fetch(`${BASE_URL}/api`);
         } catch (error) {
-          if (!failureTime) {
-            failureTime = now;
-            log("Failure detected (exception)", "warning");
-          }
-          requests.push({ time: now, success: false, serverName: "unknown" });
-          log(`✗ ERROR: ${error.message}`, "error");
+          // Silent fail - logs are shown from proxy
         }
-
-        updateMetrics();
       }
 
       async function sendRequestBurst(runId, count) {
@@ -673,21 +666,17 @@
       async function triggerFailure(runId) {
         if (!isRunning || runId !== activeRunId) return;
 
-        // Set failureTime BEFORE injecting, like the proxy does
-        failureTime = Date.now();
-        log(`💥 Failure injected on primary (timeout mode)`, "warning");
-
         // Disable the manual inject button after injection
         document.getElementById("injectBtn").disabled = true;
 
         try {
-          const res = await fetch(`${BASE_URL}/inject-failure`, {
+          await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mode: "timeout" }),
           });
         } catch (error) {
-          log(`Unable to inject failure: ${error.message}`, "error");
+          console.error("Unable to inject failure:", error);
         }
       }
 
@@ -705,12 +694,9 @@
 
       async function prepareServers() {
         try {
-          const res = await fetch(`${BASE_URL}/recover-primary`, { method: "POST" });
-          if (res.ok) {
-            log("Primary server recovered before test", "info");
-          }
+          await fetch(`${BASE_URL}/recover-primary`, { method: "POST" });
         } catch (error) {
-          log("Warning: could not contact proxy", "warning");
+          console.error("Could not recover primary:", error);
         }
       }
 
@@ -718,34 +704,71 @@
         if (requestTimer) clearTimeout(requestTimer);
         if (finishTimer) clearTimeout(finishTimer);
         if (crashTimer) clearTimeout(crashTimer);
+        if (logPollingTimer) clearInterval(logPollingTimer);
         requestTimer = null;
         finishTimer = null;
         crashTimer = null;
+        logPollingTimer = null;
       }
 
-      function finishTest() {
+      async function fetchAndDisplayMetrics() {
+        try {
+          const res = await fetch(`${BASE_URL}/metrics`);
+          const data = await res.json();
+
+          // Display T_bascule
+          if (data.T_bascule_ms !== null && data.T_bascule_ms !== undefined) {
+            document.getElementById("metric-tbascule").textContent = `${data.T_bascule_ms} ms`;
+          } else {
+            document.getElementById("metric-tbascule").textContent = "N/A";
+          }
+
+          // Display E_bascule
+          if (data.E_bascule !== null && data.E_bascule !== undefined) {
+            const eBasculePercent = (data.E_bascule * 100).toFixed(2);
+            document.getElementById("metric-ebascule").textContent = `${eBasculePercent}%`;
+          } else {
+            document.getElementById("metric-ebascule").textContent = "N/A";
+          }
+
+          // Display other metrics
+          document.getElementById("metric-total").textContent = data.totalRequests || 0;
+          document.getElementById("metric-healthy").textContent = data.primaryHealthy ? "Yes" : "No";
+          document.getElementById("metric-failed").textContent = data.counts?.failed || 0;
+          document.getElementById("metric-window").textContent = data.counts?.total || 0;
+
+          // Show metrics section
+          document.getElementById("metrics-section").style.display = "block";
+        } catch (error) {
+          console.error("Failed to fetch metrics:", error);
+        }
+      }
+
+      async function finishTest() {
         if (!isRunning) return;
         isRunning = false;
         stopTimers();
-        updateMetrics();
+
         document.getElementById("test-status").className = "status-badge status-finished";
         document.getElementById("test-status").textContent = "Finished";
         document.getElementById("startBtn").disabled = false;
         document.getElementById("stopBtn").disabled = true;
         document.getElementById("injectBtn").disabled = true;
-        log("Test completed", "success");
+
+        // Final log poll
+        await pollProxyLogs();
+
+        // Fetch and display metrics from proxy
+        await fetchAndDisplayMetrics();
       }
 
       async function startTest() {
         if (isRunning) return;
 
         stopTimers();
-        requests = [];
-        failureTime = null;
-        firstSuccessAfterFail = null;
+        lastLogCount = 0;
         document.getElementById("test-log").innerHTML = "";
-        document.getElementById("metric-tbascule").textContent = "-";
-        document.getElementById("metric-ebascule").textContent = "-";
+        document.getElementById("metrics-section").style.display = "none";
 
         await prepareServers();
 
@@ -759,7 +782,8 @@
         document.getElementById("stopBtn").disabled = false;
         document.getElementById("injectBtn").disabled = false;
 
-        log(`Test started: ${TEST_DURATION_MS / 1000}s duration, failure at ${FAILURE_DELAY_MS / 1000}s`, "info");
+        // Start log polling
+        logPollingTimer = setInterval(pollProxyLogs, LOG_POLLING_INTERVAL_MS);
 
         sendRequestBurst(runId, REQUESTS_PER_BURST);
         scheduleNextBurst(runId);
@@ -770,7 +794,6 @@
       function stopTest() {
         if (!isRunning) return;
         finishTest();
-        log("Test stopped by user", "warning");
       }
     </script>
   </body>
