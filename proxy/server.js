@@ -16,6 +16,7 @@ const WINDOW_AFTER_MS = 10000;  // 10 secondes après la panne
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));  // Servir l'UI web
 
 // ===== ÉTAT INTERNE =====
 let primaryHealthy = true;  // État de santé du primary
@@ -288,6 +289,7 @@ app.get("/status", (req, res) => {
 // ===== DÉMARRAGE DU SERVEUR =====
 app.listen(PORT, () => {
   console.log(`[${SERVER_NAME}] Server running on http://localhost:${PORT}`);
+  console.log(`[${SERVER_NAME}] Web UI available at http://localhost:${PORT}/test-client.html`);
   console.log(`[${SERVER_NAME}] Endpoints:`);
   console.log(`  - GET  /api               : Main API endpoint (routes to primary or spare)`);
   console.log(`  - GET  /metrics           : T_bascule and E_bascule metrics`);

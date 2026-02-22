@@ -46,11 +46,9 @@
     <div id="log"></div>
 
     <script>
-      const URL = "http://localhost:8080/api/data";
-      const CRASH_URL = "http://localhost:3001/crash";
-      const PRIMARY_RECOVER_URL = "http://localhost:3001/recover";
-      const SPARE_RECOVER_URL = "http://localhost:3002/recover";
-      const FAILOVER_RESET_URL = "http://localhost:8080/failover/reset";
+      const URL = "http://localhost:3000/api";
+      const INJECT_FAILURE_URL = "http://localhost:3000/inject-failure";
+      const RECOVER_PRIMARY_URL = "http://localhost:3000/recover-primary";
       const MIN_INTERVAL_MS = 100;
       const MAX_INTERVAL_MS = 300;
       const REQUESTS_PER_BURST = 3;
@@ -111,7 +109,7 @@
 
           const status = res.status;
           const data = await res.json();
-          const serverName = data.server || "unknown";
+          const serverName = data.node || "unknown";
 
           if (status !== 200 && !failureTime) {
             failureTime = now;
@@ -169,29 +167,30 @@
         if (!isRunning || runId !== activeRunId) return;
 
         try {
-          const res = await fetch(CRASH_URL, { method: "POST" });
+          const res = await fetch(INJECT_FAILURE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "timeout" }),
+          });
           if (!isRunning || runId !== activeRunId) return;
-          log(`Crash triggered on primary, status: ${res.status}`);
+          const data = await res.json();
+          log(`Failure injected on primary (timeout mode), status: ${res.status}`);
         } catch (error) {
           if (!isRunning || runId !== activeRunId) return;
-          log(`Unable to trigger crash: ${error.message}`);
+          log(`Unable to inject failure: ${error.message}`);
         }
       }
 
       async function prepareServers() {
-        const tasks = [
-          fetch(PRIMARY_RECOVER_URL, { method: "POST" }),
-          fetch(SPARE_RECOVER_URL, { method: "POST" }),
-          fetch(FAILOVER_RESET_URL, { method: "POST" }),
-        ];
-
-        const results = await Promise.allSettled(tasks);
-        const failures = results.filter((result) => result.status === "rejected");
-
-        if (failures.length > 0) {
-          log("Warning: could not recover all servers before test start");
-        } else {
-          log("Servers reset to healthy state before test");
+        try {
+          const res = await fetch(RECOVER_PRIMARY_URL, { method: "POST" });
+          if (res.ok) {
+            log("Primary server recovered before test");
+          } else {
+            log("Warning: could not recover primary before test start");
+          }
+        } catch (error) {
+          log("Warning: could not contact proxy to recover primary");
         }
       }
 
