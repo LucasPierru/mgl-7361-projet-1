@@ -672,13 +672,16 @@
       async function triggerFailure(runId) {
         if (!isRunning || runId !== activeRunId) return;
 
+        // Set failureTime BEFORE injecting, like the proxy does
+        failureTime = Date.now();
+        log(`💥 Failure injected on primary (timeout mode)`, "warning");
+
         try {
           const res = await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mode: "timeout" }),
           });
-          log(`💥 Failure injected on primary (timeout mode)`, "warning");
         } catch (error) {
           log(`Unable to inject failure: ${error.message}`, "error");
         }
