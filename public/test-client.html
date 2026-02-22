@@ -437,6 +437,7 @@
         <div class="test-controls">
           <button id="startBtn" class="btn-success" onclick="startTest()">Start Test</button>
           <button id="stopBtn" class="btn-danger" onclick="stopTest()" disabled>Stop Test</button>
+          <button id="injectBtn" class="btn-danger" onclick="manualInjectFailure()" disabled>Inject Failure</button>
         </div>
 
         <div id="test-status" class="status-badge status-idle">Idle</div>
@@ -676,6 +677,9 @@
         failureTime = Date.now();
         log(`💥 Failure injected on primary (timeout mode)`, "warning");
 
+        // Disable the manual inject button after injection
+        document.getElementById("injectBtn").disabled = true;
+
         try {
           const res = await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
@@ -685,6 +689,18 @@
         } catch (error) {
           log(`Unable to inject failure: ${error.message}`, "error");
         }
+      }
+
+      async function manualInjectFailure() {
+        if (!isRunning) return;
+
+        // Cancel the automatic failure timer since we're injecting manually
+        if (crashTimer) {
+          clearTimeout(crashTimer);
+          crashTimer = null;
+        }
+
+        await triggerFailure(activeRunId);
       }
 
       async function prepareServers() {
@@ -716,6 +732,7 @@
         document.getElementById("test-status").textContent = "Finished";
         document.getElementById("startBtn").disabled = false;
         document.getElementById("stopBtn").disabled = true;
+        document.getElementById("injectBtn").disabled = true;
         log("Test completed", "success");
       }
 
@@ -740,6 +757,7 @@
         document.getElementById("test-status").textContent = "Running";
         document.getElementById("startBtn").disabled = true;
         document.getElementById("stopBtn").disabled = false;
+        document.getElementById("injectBtn").disabled = false;
 
         log(`Test started: ${TEST_DURATION_MS / 1000}s duration, failure at ${FAILURE_DELAY_MS / 1000}s`, "info");
 
