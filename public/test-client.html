@@ -365,19 +365,6 @@
           </div>
         </div>
 
-        <!-- GET /status -->
-        <div class="endpoint">
-          <div class="endpoint-header" onclick="toggleEndpoint('status')">
-            <span class="method get">GET</span>
-            <span class="endpoint-path">/status</span>
-          </div>
-          <div id="status-body" class="endpoint-body hidden">
-            <div class="endpoint-description">Get current proxy status and health monitoring state</div>
-            <button class="btn-primary btn-small" onclick="testGetStatus()">Send Request</button>
-            <div id="status-response" class="response-area" style="display: none;"></div>
-          </div>
-        </div>
-
         <!-- GET /logs -->
         <div class="endpoint">
           <div class="endpoint-header" onclick="toggleEndpoint('logs')">
@@ -395,6 +382,23 @@
           </div>
         </div>
 
+        <!-- POST /heartbeat -->
+        <div class="endpoint">
+          <div class="endpoint-header" onclick="toggleEndpoint('heartbeat')">
+            <span class="method post">POST</span>
+            <span class="endpoint-path">/heartbeat?from=X</span>
+          </div>
+          <div id="heartbeat-body" class="endpoint-body hidden">
+            <div class="endpoint-description">Send heartbeat to proxy (normally sent by primary service)</div>
+            <div class="form-group">
+              <label>From Service</label>
+              <input type="text" id="heartbeat-from" value="primary" />
+            </div>
+            <button class="btn-primary btn-small" onclick="testHeartbeat()">Send Heartbeat</button>
+            <div id="heartbeat-response" class="response-area" style="display: none;"></div>
+          </div>
+        </div>
+
         <!-- POST /inject-failure -->
         <div class="endpoint">
           <div class="endpoint-header" onclick="toggleEndpoint('inject')">
@@ -402,30 +406,9 @@
             <span class="endpoint-path">/inject-failure</span>
           </div>
           <div id="inject-body" class="endpoint-body hidden">
-            <div class="endpoint-description">Trigger a failure on the primary server</div>
-            <div class="form-group">
-              <label>Failure Mode</label>
-              <select id="failure-mode">
-                <option value="timeout">timeout - Server doesn't respond</option>
-                <option value="error">error - Server returns 500</option>
-                <option value="crash">crash - Server process exits</option>
-              </select>
-            </div>
-            <button class="btn-danger btn-small" onclick="testInjectFailure()">Inject Failure</button>
+            <div class="endpoint-description">Trigger a crash on the primary server</div>
+            <button class="btn-danger btn-small" onclick="testInjectFailure()">Inject Failure (Crash)</button>
             <div id="inject-response" class="response-area" style="display: none;"></div>
-          </div>
-        </div>
-
-        <!-- POST /recover-primary -->
-        <div class="endpoint">
-          <div class="endpoint-header" onclick="toggleEndpoint('recover')">
-            <span class="method post">POST</span>
-            <span class="endpoint-path">/recover-primary</span>
-          </div>
-          <div id="recover-body" class="endpoint-body hidden">
-            <div class="endpoint-description">Recover the primary server from failure mode</div>
-            <button class="btn-success btn-small" onclick="testRecoverPrimary()">Recover Primary</button>
-            <div id="recover-response" class="response-area" style="display: none;"></div>
           </div>
         </div>
       </div>
@@ -531,16 +514,6 @@
         }
       }
 
-      async function testGetStatus() {
-        try {
-          const res = await fetch(`${BASE_URL}/status`);
-          const data = await res.json();
-          displayResponse("status", data, res.status);
-        } catch (error) {
-          displayResponse("status", { error: error.message }, 0);
-        }
-      }
-
       async function testGetLogs() {
         try {
           const limit = document.getElementById("logs-limit").value;
@@ -552,30 +525,30 @@
         }
       }
 
+      async function testHeartbeat() {
+        try {
+          const from = document.getElementById("heartbeat-from").value;
+          const res = await fetch(`${BASE_URL}/heartbeat?from=${from}`, {
+            method: "POST",
+          });
+          const data = await res.json();
+          displayResponse("heartbeat", data, res.status);
+        } catch (error) {
+          displayResponse("heartbeat", { error: error.message }, 0);
+        }
+      }
+
       async function testInjectFailure() {
         try {
-          const mode = document.getElementById("failure-mode").value;
           const res = await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode }),
+            body: JSON.stringify({ mode: "crash" }),
           });
           const data = await res.json();
           displayResponse("inject", data, res.status);
         } catch (error) {
           displayResponse("inject", { error: error.message }, 0);
-        }
-      }
-
-      async function testRecoverPrimary() {
-        try {
-          const res = await fetch(`${BASE_URL}/recover-primary`, {
-            method: "POST",
-          });
-          const data = await res.json();
-          displayResponse("recover", data, res.status);
-        } catch (error) {
-          displayResponse("recover", { error: error.message }, 0);
         }
       }
 
@@ -675,7 +648,7 @@
           await fetch(`${BASE_URL}/inject-failure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: "timeout" }),
+            body: JSON.stringify({ mode: "crash" }),
           });
         } catch (error) {
           console.error("Unable to inject failure:", error);
@@ -692,14 +665,6 @@
         }
 
         await triggerFailure(activeRunId);
-      }
-
-      async function prepareServers() {
-        try {
-          await fetch(`${BASE_URL}/recover-primary`, { method: "POST" });
-        } catch (error) {
-          console.error("Could not recover primary:", error);
-        }
       }
 
       function stopTimers() {
@@ -771,8 +736,6 @@
         displayedLogCount = 0;
         document.getElementById("test-log").innerHTML = "";
         document.getElementById("metrics-section").style.display = "none";
-
-        await prepareServers();
 
         activeRunId += 1;
         const runId = activeRunId;

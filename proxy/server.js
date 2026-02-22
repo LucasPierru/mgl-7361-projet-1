@@ -8,8 +8,8 @@ const SERVER_NAME = "proxy";
 // Configuration
 const PRIMARY_BASE = "http://localhost:3001";
 const SPARE_BASE = "http://localhost:3002";
-const CHECK_INTERVAL_MS = 500;  // 500ms entre chaque ping/echo
-const HEALTH_TIMEOUT_MS = 400;  // 400ms timeout pour health check
+const HEARTBEAT_TIMEOUT_MS = 4000;  // 4 secondes sans heartbeat = DOWN
+const CHECK_HEARTBEAT_INTERVAL_MS = 500;  // Vérifier toutes les 500ms
 const WINDOW_BEFORE_MS = 2000;  // 2 secondes avant la panne
 const WINDOW_AFTER_MS = 10000;  // 10 secondes après la panne
 
@@ -20,6 +20,7 @@ app.use(express.static('public'));  // Servir l'UI web
 
 // ===== ÉTAT INTERNE =====
 let primaryHealthy = true;  // État de santé du primary
+let lastHeartbeat = null;   // Timestamp du dernier heartbeat reçu
 let tFail = null;           // Timestamp injection de panne
 let tFirstSpare200 = null;  // Timestamp première réponse 200 du spare après panne
 let requestsLog = [];       // Log de toutes les requêtes
@@ -28,8 +29,7 @@ console.log(`[${SERVER_NAME}] Starting on port ${PORT}`);
 console.log(`[${SERVER_NAME}] Configuration:`);
 console.log(`  - PRIMARY_BASE: ${PRIMARY_BASE}`);
 console.log(`  - SPARE_BASE: ${SPARE_BASE}`);
-console.log(`  - CHECK_INTERVAL_MS: ${CHECK_INTERVAL_MS}`);
-console.log(`  - HEALTH_TIMEOUT_MS: ${HEALTH_TIMEOUT_MS}`);
+console.log(`  - HEARTBEAT_TIMEOUT_MS: ${HEARTBEAT_TIMEOUT_MS}`);
 
 // ===== HELPER: FETCH WITH TIMEOUT =====
 async function fetchWithTimeout(url, options, timeoutMs) {
@@ -49,52 +49,57 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
-// ===== PING/ECHO : MONITORING DU PRIMARY =====
-async function checkPrimaryHealth() {
-  try {
-    const response = await fetchWithTimeout(
-      `${PRIMARY_BASE}/health`,
-      { method: "GET" },
-      HEALTH_TIMEOUT_MS
-    );
+// ===== HEARTBEAT : MONITORING DU PRIMARY =====
+function checkHeartbeats() {
+  const now = Date.now();
 
-    if (response.status === 200) {
-      if (!primaryHealthy) {
-        console.log(`[${SERVER_NAME}] Primary is UP again`);
-      }
-      primaryHealthy = true;
-    } else {
-      if (primaryHealthy) {
-        console.log(`[${SERVER_NAME}] Primary is DOWN (status ${response.status})`);
-      }
+  if (lastHeartbeat === null) {
+    // Pas encore de heartbeat reçu, considérer primary comme UP au démarrage
+    return;
+  }
+
+  const timeSinceLastHeartbeat = now - lastHeartbeat;
+
+  if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
+    if (primaryHealthy) {
+      console.log(`[${SERVER_NAME}] Primary is DOWN (no heartbeat for ${timeSinceLastHeartbeat}ms)`);
       primaryHealthy = false;
     }
-  } catch (error) {
-    if (primaryHealthy) {
-      console.log(`[${SERVER_NAME}] Primary is DOWN (${error.message})`);
+  } else {
+    if (!primaryHealthy) {
+      console.log(`[${SERVER_NAME}] Primary is UP again (heartbeat received)`);
+      primaryHealthy = true;
     }
-    primaryHealthy = false;
   }
 }
 
-// Lancer le monitoring en boucle
-let monitoringInterval = null;
+// Lancer la vérification des heartbeats en boucle
+let heartbeatCheckInterval = null;
 
-function startMonitoring() {
-  if (monitoringInterval) {
-    clearInterval(monitoringInterval);
+function startHeartbeatMonitoring() {
+  if (heartbeatCheckInterval) {
+    clearInterval(heartbeatCheckInterval);
   }
 
-  // Premier check immédiat
-  checkPrimaryHealth();
+  heartbeatCheckInterval = setInterval(() => {
+    checkHeartbeats();
+  }, CHECK_HEARTBEAT_INTERVAL_MS);
 
-  // Puis checks périodiques
-  monitoringInterval = setInterval(() => {
-    checkPrimaryHealth();
-  }, CHECK_INTERVAL_MS);
-
-  console.log(`[${SERVER_NAME}] Monitoring started (every ${CHECK_INTERVAL_MS}ms)`);
+  console.log(`[${SERVER_NAME}] Heartbeat monitoring started (checking every ${CHECK_HEARTBEAT_INTERVAL_MS}ms)`);
 }
+
+// ===== RECEVOIR HEARTBEAT : POST /heartbeat =====
+app.post("/heartbeat", (req, res) => {
+  const from = req.query.from;
+  const timestamp = Date.now();
+
+  if (from === "primary") {
+    lastHeartbeat = timestamp;
+    console.log(`[${SERVER_NAME}] Received heartbeat from primary at timestamp ${timestamp}`);
+  }
+
+  res.status(200).json({ ok: true, timestamp });
+});
 
 // ===== ROUTAGE : GET /api =====
 app.get("/api", async (req, res) => {
@@ -155,7 +160,7 @@ app.get("/api", async (req, res) => {
 
 // ===== DÉCLENCHER UNE PANNE VIA LE PROXY : POST /inject-failure =====
 app.post("/inject-failure", async (req, res) => {
-  const mode = req.body.mode || "timeout";
+  const mode = req.body.mode || "crash";
 
   // Enregistrer le timestamp de la panne
   tFail = Date.now();
@@ -184,29 +189,6 @@ app.post("/inject-failure", async (req, res) => {
       ok: true,
       tFail,
       mode,
-      error: `Failed to contact primary: ${error.message}`,
-    });
-  }
-});
-
-// ===== RÉCUPÉRER LE PRIMARY : POST /recover-primary =====
-app.post("/recover-primary", async (req, res) => {
-  console.log(`[${SERVER_NAME}] Recovering primary`);
-
-  try {
-    const response = await fetch(`${PRIMARY_BASE}/recover`, {
-      method: "POST",
-    });
-
-    const result = await response.json();
-
-    res.status(200).json({
-      ok: true,
-      primaryResponse: result,
-    });
-  } catch (error) {
-    res.status(500).json({
-      ok: false,
       error: `Failed to contact primary: ${error.message}`,
     });
   }
@@ -270,43 +252,26 @@ app.get("/logs", (req, res) => {
   });
 });
 
-// ===== ENDPOINT DEBUG : GET /status =====
-app.get("/status", (req, res) => {
-  res.status(200).json({
-    proxy: SERVER_NAME,
-    port: PORT,
-    primaryHealthy,
-    tFail,
-    tFirstSpare200,
-    totalRequests: requestsLog.length,
-    monitoring: {
-      interval_ms: CHECK_INTERVAL_MS,
-      timeout_ms: HEALTH_TIMEOUT_MS,
-    },
-  });
-});
-
 // ===== DÉMARRAGE DU SERVEUR =====
 app.listen(PORT, () => {
   console.log(`[${SERVER_NAME}] Server running on http://localhost:${PORT}`);
   console.log(`[${SERVER_NAME}] Web UI available at http://localhost:${PORT}/test-client.html`);
   console.log(`[${SERVER_NAME}] Endpoints:`);
+  console.log(`  - POST /heartbeat?from=X  : Receive heartbeat from service`);
   console.log(`  - GET  /api               : Main API endpoint (routes to primary or spare)`);
   console.log(`  - GET  /metrics           : T_bascule and E_bascule metrics`);
   console.log(`  - POST /inject-failure    : Trigger failure on primary`);
-  console.log(`  - POST /recover-primary   : Recover primary from failure`);
   console.log(`  - GET  /logs              : Recent request logs`);
-  console.log(`  - GET  /status            : Current proxy status`);
 
-  // Démarrer le monitoring
-  startMonitoring();
+  // Démarrer le monitoring heartbeat
+  startHeartbeatMonitoring();
 });
 
 // Cleanup à l'arrêt
 process.on("SIGINT", () => {
   console.log(`\n[${SERVER_NAME}] Stopping...`);
-  if (monitoringInterval) {
-    clearInterval(monitoringInterval);
+  if (heartbeatCheckInterval) {
+    clearInterval(heartbeatCheckInterval);
   }
   process.exit(0);
 });

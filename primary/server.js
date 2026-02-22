@@ -1,18 +1,48 @@
 const express = require("express");
 const cors = require("cors");
+const fetch = require("node-fetch");
 
 const PORT = process.env.PORT || 3001;
 const SERVER_NAME = "primary";
+const PROXY_BASE = "http://localhost:3000";
+const HEARTBEAT_INTERVAL_MS = 1000;  // Envoyer heartbeat toutes les 1 seconde
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // État interne : mode de défaillance
-// Valeurs possibles : "none", "error", "timeout", "crash"
+// Valeurs possibles : "none", "crash"
 let failureMode = "none";
 
 console.log(`[${SERVER_NAME}] Starting on port ${PORT}`);
+
+// ===== HEARTBEAT : ENVOYER AU PROXY =====
+async function sendHeartbeat() {
+  try {
+    await fetch(`${PROXY_BASE}/heartbeat?from=primary`, {
+      method: "POST",
+    });
+  } catch (error) {
+    // Si le proxy n'est pas disponible, on continue silencieusement
+    // console.error(`[${SERVER_NAME}] Failed to send heartbeat: ${error.message}`);
+  }
+}
+
+// Démarrer l'envoi de heartbeats
+let heartbeatInterval = null;
+
+function startHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
+  heartbeatInterval = setInterval(() => {
+    sendHeartbeat();
+  }, HEARTBEAT_INTERVAL_MS);
+
+  console.log(`[${SERVER_NAME}] Heartbeat started (every ${HEARTBEAT_INTERVAL_MS}ms)`);
+}
 
 // ===== ENDPOINT PRINCIPAL : GET /api =====
 app.get("/api", (req, res) => {
@@ -28,66 +58,9 @@ app.get("/api", (req, res) => {
     });
   }
 
-  if (failureMode === "error") {
-    // Mode erreur : réponse 500
-    console.log(`[${SERVER_NAME}] Returning 500 error (simulated)`);
-    return res.status(500).json({
-      node: SERVER_NAME,
-      ok: false,
-      error: "simulated",
-      ts: Date.now(),
-    });
-  }
-
-  if (failureMode === "timeout") {
-    // Mode timeout : ne répond jamais (laisse la connexion ouverte)
-    console.log(`[${SERVER_NAME}] Timeout mode - not responding`);
-    // Ne pas envoyer de réponse = timeout côté client
-    return;
-  }
-
   if (failureMode === "crash") {
-    // Mode crash : terminer le processus
+    // Mode crash : terminer le processus immédiatement
     console.log(`[${SERVER_NAME}] CRASH mode triggered - exiting process`);
-    process.exit(1);
-  }
-});
-
-// ===== HEALTH CHECK : GET /health =====
-app.get("/health", (req, res) => {
-  console.log(`[${SERVER_NAME}] GET /health - failureMode: ${failureMode}`);
-
-  if (failureMode === "none") {
-    // Mode normal : healthy
-    return res.status(200).json({
-      status: "up",
-      node: SERVER_NAME,
-      ts: Date.now(),
-    });
-  }
-
-  if (failureMode === "error") {
-    // Mode erreur : on peut choisir 500 (service a un problème)
-    // Ou 200 mais avec status "degraded"
-    // Ici on choisit 500 pour indiquer un problème
-    return res.status(500).json({
-      status: "degraded",
-      node: SERVER_NAME,
-      error: "simulated",
-      ts: Date.now(),
-    });
-  }
-
-  if (failureMode === "timeout") {
-    // Mode timeout : ne répond pas
-    console.log(`[${SERVER_NAME}] Health check - timeout mode (not responding)`);
-    return;
-  }
-
-  if (failureMode === "crash") {
-    // En mode crash, le processus sera terminé donc ce code ne sera pas atteint
-    // Mais on le met pour la complétude
-    console.log(`[${SERVER_NAME}] Health check - CRASH mode`);
     process.exit(1);
   }
 });
@@ -96,40 +69,29 @@ app.get("/health", (req, res) => {
 app.post("/fail", (req, res) => {
   const { mode } = req.body;
 
-  if (!mode || !["error", "timeout", "crash"].includes(mode)) {
+  if (mode !== "crash") {
     return res.status(400).json({
       ok: false,
-      error: "Invalid mode. Must be 'error', 'timeout', or 'crash'",
+      error: "Invalid mode. Must be 'crash'",
     });
   }
 
   failureMode = mode;
   console.log(`[${SERVER_NAME}] Failure mode set to: ${failureMode}`);
 
-  // Si mode crash, on répond d'abord puis on crash
-  if (mode === "crash") {
-    res.status(200).json({
-      ok: true,
-      mode: failureMode,
-      message: `${SERVER_NAME} will crash on next request`,
-      ts: Date.now(),
-    });
-
-    // Crash après un petit délai pour laisser la réponse partir
-    setTimeout(() => {
-      console.log(`[${SERVER_NAME}] Crashing now...`);
-      process.exit(1);
-    }, 100);
-
-    return;
-  }
-
+  // Répondre d'abord puis crash immédiatement
   res.status(200).json({
     ok: true,
     mode: failureMode,
-    message: `${SERVER_NAME} failure mode activated`,
+    message: `${SERVER_NAME} will crash immediately`,
     ts: Date.now(),
   });
+
+  // Crash après un petit délai pour laisser la réponse partir
+  setTimeout(() => {
+    console.log(`[${SERVER_NAME}] Crashing now...`);
+    process.exit(1);
+  }, 100);
 });
 
 // ===== RÉCUPÉRATION : POST /recover =====
@@ -164,8 +126,19 @@ app.listen(PORT, () => {
   console.log(`[${SERVER_NAME}] Initial failureMode: ${failureMode}`);
   console.log(`[${SERVER_NAME}] Endpoints:`);
   console.log(`  - GET  /api           : Main API endpoint`);
-  console.log(`  - GET  /health        : Health check`);
-  console.log(`  - POST /fail          : Trigger failure (body: {mode: "error"|"timeout"|"crash"})`);
+  console.log(`  - POST /fail          : Trigger failure (body: {mode: "crash"})`);
   console.log(`  - POST /recover       : Recover from failure`);
   console.log(`  - GET  /status        : Current status`);
+
+  // Démarrer l'envoi de heartbeats au proxy
+  startHeartbeat();
+});
+
+// Cleanup à l'arrêt
+process.on("SIGINT", () => {
+  console.log(`\n[${SERVER_NAME}] Stopping...`);
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+  process.exit(0);
 });

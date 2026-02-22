@@ -80,14 +80,14 @@ async function sendRequest() {
 async function injectFailure() {
   if (failureInjected) return;
 
-  log("💥 Injecting failure on primary (timeout mode)", colors.yellow);
+  log("💥 Injecting failure on primary (crash mode)", colors.yellow);
   failureInjected = true;
 
   try {
     const response = await fetch("http://localhost:3000/inject-failure", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "timeout" }),
+      body: JSON.stringify({ mode: "crash" }),
     });
 
     const result = await response.json();

@@ -23,18 +23,6 @@ app.get("/api", (req, res) => {
   });
 });
 
-// ===== HEALTH CHECK : GET /health =====
-// Le spare est toujours UP
-app.get("/health", (req, res) => {
-  console.log(`[${SERVER_NAME}] GET /health - always healthy`);
-
-  res.status(200).json({
-    status: "up",
-    node: SERVER_NAME,
-    ts: Date.now(),
-  });
-});
-
 // ===== ENDPOINT DE DEBUG (optionnel) =====
 app.get("/status", (req, res) => {
   res.status(200).json({
@@ -51,6 +39,5 @@ app.listen(PORT, () => {
   console.log(`[${SERVER_NAME}] Role: Warm spare (always available)`);
   console.log(`[${SERVER_NAME}] Endpoints:`);
   console.log(`  - GET /api     : Main API endpoint (always 200)`);
-  console.log(`  - GET /health  : Health check (always 200)`);
   console.log(`  - GET /status  : Current status`);
 });
