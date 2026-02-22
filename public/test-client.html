@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Failover Test Client</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+
+      button {
+        padding: 8px 14px;
+        margin-right: 8px;
+      }
+
+      #status {
+        margin-top: 12px;
+        font-weight: bold;
+      }
+
+      #results {
+        margin-top: 12px;
+      }
+
+      #log {
+        margin-top: 12px;
+        border: 1px solid #ccc;
+        padding: 10px;
+        height: 280px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: #fafafa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Failover Test Client</h1>
+
+    <button id="startBtn">Start Test</button>
+    <button id="stopBtn" disabled>Stop</button>
+
+    <div id="status">Idle</div>
+    <div id="results">No results yet.</div>
+    <div id="log"></div>
+
+    <script>
+      const URL = "http://localhost:8080/api/data";
+      const CRASH_URL = "http://localhost:3001/crash";
+      const PRIMARY_RECOVER_URL = "http://localhost:3001/recover";
+      const SPARE_RECOVER_URL = "http://localhost:3002/recover";
+      const FAILOVER_RESET_URL = "http://localhost:8080/failover/reset";
+      const MIN_INTERVAL_MS = 100;
+      const MAX_INTERVAL_MS = 300;
+      const REQUESTS_PER_BURST = 3;
+      const TEST_DURATION_MS = 30000;
+      const FAILURE_DELAY_MS = 20000;
+
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const statusEl = document.getElementById("status");
+      const resultsEl = document.getElementById("results");
+      const logEl = document.getElementById("log");
+
+      let requests = [];
+      let failureTime = null;
+      let firstSuccessAfterFail = null;
+      let requestTimer = null;
+      let finishTimer = null;
+      let crashTimer = null;
+      let isRunning = false;
+      let activeRunId = 0;
+
+      function getNextIntervalMs() {
+        const span = MAX_INTERVAL_MS - MIN_INTERVAL_MS;
+        return MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
+      }
+
+      function log(message) {
+        const now = new Date().toTimeString().split(" ")[0];
+        logEl.textContent += `[${now}] ${message}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function resetState() {
+        requests = [];
+        failureTime = null;
+        firstSuccessAfterFail = null;
+        resultsEl.textContent = "Running...";
+        logEl.textContent = "";
+      }
+
+      function stopTimers() {
+        if (requestTimer) clearTimeout(requestTimer);
+        if (finishTimer) clearTimeout(finishTimer);
+        if (crashTimer) clearTimeout(crashTimer);
+
+        requestTimer = null;
+        finishTimer = null;
+        crashTimer = null;
+      }
+
+      async function sendRequest(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        const now = Date.now();
+        try {
+          const res = await fetch(URL);
+          if (!isRunning || runId !== activeRunId) return;
+
+          const status = res.status;
+          const data = await res.json();
+          const serverName = data.server || "unknown";
+
+          if (status !== 200 && !failureTime) {
+            failureTime = now;
+            log(`Failure detected at ${failureTime}`);
+          }
+
+          if (failureTime && status === 200 && !firstSuccessAfterFail) {
+            firstSuccessAfterFail = now;
+            log(`First recovery at ${firstSuccessAfterFail}`);
+          }
+
+          requests.push({
+            time: now,
+            success: status === 200,
+            serverName,
+          });
+
+          log(`Status: ${status}; Server: ${serverName}`);
+        } catch (error) {
+          if (!isRunning || runId !== activeRunId) return;
+
+          if (!failureTime) {
+            failureTime = now;
+            log("Failure detected (exception)");
+          }
+
+          requests.push({
+            time: now,
+            success: false,
+            serverName: "unknown",
+          });
+
+          log(`ERROR: ${error.message}`);
+        }
+      }
+
+      async function sendRequestBurst(runId, count) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        const tasks = Array.from({ length: count }, () => sendRequest(runId));
+        await Promise.allSettled(tasks);
+      }
+
+      function scheduleNextBurst(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        const delay = getNextIntervalMs();
+        requestTimer = setTimeout(async () => {
+          await sendRequestBurst(runId, REQUESTS_PER_BURST);
+          scheduleNextBurst(runId);
+        }, delay);
+      }
+
+      async function triggerFailure(runId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        try {
+          const res = await fetch(CRASH_URL, { method: "POST" });
+          if (!isRunning || runId !== activeRunId) return;
+          log(`Crash triggered on primary, status: ${res.status}`);
+        } catch (error) {
+          if (!isRunning || runId !== activeRunId) return;
+          log(`Unable to trigger crash: ${error.message}`);
+        }
+      }
+
+      async function prepareServers() {
+        const tasks = [
+          fetch(PRIMARY_RECOVER_URL, { method: "POST" }),
+          fetch(SPARE_RECOVER_URL, { method: "POST" }),
+          fetch(FAILOVER_RESET_URL, { method: "POST" }),
+        ];
+
+        const results = await Promise.allSettled(tasks);
+        const failures = results.filter((result) => result.status === "rejected");
+
+        if (failures.length > 0) {
+          log("Warning: could not recover all servers before test start");
+        } else {
+          log("Servers reset to healthy state before test");
+        }
+      }
+
+      async function waitForHealthyStart() {
+        const maxAttempts = 10;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          try {
+            const res = await fetch(URL);
+            if (res.status === 200) {
+              log("Warm-up check passed (200)");
+              return true;
+            }
+          } catch (error) {
+            // Retry until max attempts
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+
+        log("Warning: warm-up check did not get 200 before test start");
+        return false;
+      }
+
+      function computeResults() {
+        let tbasculeText = "n/a";
+        let ebasculeText = "n/a";
+
+        if (failureTime && firstSuccessAfterFail) {
+          const tBascule = (firstSuccessAfterFail - failureTime) / 1000;
+          tbasculeText = `${tBascule.toFixed(2)} s`;
+        }
+
+        if (failureTime) {
+          const windowStart = failureTime - 2000;
+          const windowEnd = failureTime + 10000;
+
+          const windowRequests = requests.filter((r) => r.time >= windowStart && r.time <= windowEnd);
+          if (windowRequests.length > 0) {
+            const errors = windowRequests.filter((r) => !r.success);
+            const errorRate = (errors.length / windowRequests.length) * 100;
+            ebasculeText = `${errorRate.toFixed(2)} %`;
+          }
+        }
+
+        resultsEl.textContent = `T_bascule: ${tbasculeText} | E_bascule: ${ebasculeText}`;
+        log(`RESULTS -> T_bascule: ${tbasculeText}, E_bascule: ${ebasculeText}`);
+      }
+
+      function finishTest(runId = activeRunId) {
+        if (!isRunning || runId !== activeRunId) return;
+
+        isRunning = false;
+        stopTimers();
+        computeResults();
+        statusEl.textContent = "Finished";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+
+      async function startTest() {
+        if (isRunning) return;
+
+        stopTimers();
+        resetState();
+        await prepareServers();
+        await waitForHealthyStart();
+
+        activeRunId += 1;
+        const runId = activeRunId;
+        isRunning = true;
+
+        statusEl.textContent = "Running";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        sendRequestBurst(runId, REQUESTS_PER_BURST);
+        scheduleNextBurst(runId);
+        crashTimer = setTimeout(() => triggerFailure(runId), FAILURE_DELAY_MS);
+        finishTimer = setTimeout(() => finishTest(runId), TEST_DURATION_MS);
+
+        log(
+          `Duration: ${TEST_DURATION_MS / 1000} s, crash after: ${FAILURE_DELAY_MS / 1000} s, Requests sent every ${MIN_INTERVAL_MS}-${MAX_INTERVAL_MS} ms in bursts of ${REQUESTS_PER_BURST}`,
+        );
+      }
+
+      function stopTest() {
+        if (!isRunning) return;
+
+        isRunning = false;
+        stopTimers();
+        statusEl.textContent = "Stopped";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        computeResults();
+      }
+
+      startBtn.addEventListener("click", startTest);
+      stopBtn.addEventListener("click", stopTest);
+    </script>
+  </body>
+</html>

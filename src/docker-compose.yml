@@ -1,0 +1,24 @@
+services:
+  failover:
+    build: ./failover
+    ports:
+      - "8080:8080"
+    depends_on:
+      - primary
+      - spare
+
+  primary:
+    build: ./server
+    container_name: primary
+    environment:
+      - SERVER_NAME=primary
+    ports:
+      - "3001:3000"
+
+  spare:
+    build: ./server
+    container_name: spare
+    environment:
+      - SERVER_NAME=spare
+    ports:
+      - "3002:3000"
