@@ -432,28 +432,24 @@
           <h3 style="margin-bottom: 12px;">Test Results</h3>
           <div class="metrics">
             <div class="metric-card">
-              <div class="metric-label">T_bascule</div>
-              <div id="metric-tbascule" class="metric-value">-</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">E_bascule</div>
-              <div id="metric-ebascule" class="metric-value">-</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Total Requests</div>
-              <div id="metric-total" class="metric-value">-</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Primary Healthy</div>
-              <div id="metric-healthy" class="metric-value">-</div>
-            </div>
-            <div class="metric-card">
               <div class="metric-label">Failed Requests</div>
               <div id="metric-failed" class="metric-value">-</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Window Requests</div>
               <div id="metric-window" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">E_bascule</div>
+              <div id="metric-ebascule" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">T_bascule</div>
+              <div id="metric-tbascule" class="metric-value">-</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Requests</div>
+              <div id="metric-total" class="metric-value">-</div>
             </div>
           </div>
         </div>
@@ -699,10 +695,9 @@
           }
 
           // Display other metrics
-          document.getElementById("metric-total").textContent = data.totalRequests || 0;
-          document.getElementById("metric-healthy").textContent = data.primaryHealthy ? "Yes" : "No";
           document.getElementById("metric-failed").textContent = data.counts?.failed || 0;
           document.getElementById("metric-window").textContent = data.counts?.total || 0;
+          document.getElementById("metric-total").textContent = data.totalRequests || 0;
 
           // Show metrics section
           document.getElementById("metrics-section").style.display = "block";
