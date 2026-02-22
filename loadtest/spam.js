@@ -2,9 +2,13 @@ const fetch = require("node-fetch");
 
 // Configuration
 const URL = "http://localhost:3000/api";
-const REQUEST_INTERVAL_MS = 100;  // 10 requêtes par seconde
+const MIN_INTERVAL_MS = 100;      // Intervalle min entre bursts
+const MAX_INTERVAL_MS = 300;      // Intervalle max entre bursts
+const REQUESTS_PER_BURST = 5;     // Nombre de requêtes simultanées par burst
 const TEST_DURATION_MS = 30000;   // 30 secondes
 const INJECT_FAILURE_AT_MS = 10000; // Injecter panne après 10 secondes
+
+// Calcul: 5 req / 0.2s (moyenne) = 25 req/sec
 
 // État
 let requests = [];
@@ -152,34 +156,41 @@ function printResults() {
   console.log("=".repeat(60) + "\n");
 }
 
+function getNextIntervalMs() {
+  const span = MAX_INTERVAL_MS - MIN_INTERVAL_MS;
+  return MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
+}
+
+async function sendRequestBurst() {
+  const promises = [];
+  for (let i = 0; i < REQUESTS_PER_BURST; i++) {
+    promises.push(sendRequest());
+  }
+  await Promise.all(promises);
+}
+
 async function runLoadTest() {
   console.log("\n" + "=".repeat(60));
   console.log(`${colors.cyan}STARTING LOAD TEST${colors.reset}`);
   console.log("=".repeat(60));
   console.log(`Target:            ${URL}`);
-  console.log(`Request interval:  ${REQUEST_INTERVAL_MS}ms (${1000 / REQUEST_INTERVAL_MS} req/sec)`);
+  console.log(`Request interval:  ${MIN_INTERVAL_MS}-${MAX_INTERVAL_MS}ms in bursts of ${REQUESTS_PER_BURST}`);
+  console.log(`Avg throughput:    ~25 req/sec`);
   console.log(`Test duration:     ${TEST_DURATION_MS / 1000}s`);
   console.log(`Inject failure at: ${INJECT_FAILURE_AT_MS / 1000}s`);
   console.log("=".repeat(60) + "\n");
 
   testStartTime = Date.now();
 
-  // Boucle principale
-  const interval = setInterval(async () => {
+  // Première burst immédiate
+  await sendRequestBurst();
+
+  // Fonction récursive pour les bursts suivants
+  function scheduleNextBurst() {
     const elapsed = Date.now() - testStartTime;
-
-    // Injecter la panne après INJECT_FAILURE_AT_MS
-    if (elapsed >= INJECT_FAILURE_AT_MS && !failureInjected) {
-      await injectFailure();
-    }
-
-    // Envoyer une requête
-    await sendRequest();
 
     // Arrêter le test après TEST_DURATION_MS
     if (elapsed >= TEST_DURATION_MS) {
-      clearInterval(interval);
-
       log("Test completed", colors.cyan);
 
       // Attendre un peu pour les dernières requêtes
@@ -187,11 +198,29 @@ async function runLoadTest() {
         printResults();
         process.exit(0);
       }, 1000);
+      return;
     }
-  }, REQUEST_INTERVAL_MS);
 
-  // Première requête immédiate
-  await sendRequest();
+    // Injecter la panne après INJECT_FAILURE_AT_MS
+    if (elapsed >= INJECT_FAILURE_AT_MS && !failureInjected) {
+      injectFailure().then(() => {
+        // Continuer après l'injection
+        const delay = getNextIntervalMs();
+        setTimeout(() => {
+          sendRequestBurst().then(scheduleNextBurst);
+        }, delay);
+      });
+    } else {
+      // Envoyer le prochain burst après un délai aléatoire
+      const delay = getNextIntervalMs();
+      setTimeout(() => {
+        sendRequestBurst().then(scheduleNextBurst);
+      }, delay);
+    }
+  }
+
+  // Démarrer la boucle de bursts
+  scheduleNextBurst();
 }
 
 // Gérer Ctrl+C
