@@ -586,7 +586,7 @@
       let finishTimer = null;
       let crashTimer = null;
       let logPollingTimer = null;
-      let lastLogCount = 0;
+      let displayedLogCount = 0;
 
       const MIN_INTERVAL_MS = 100;
       const MAX_INTERVAL_MS = 300;
@@ -595,11 +595,13 @@
       const FAILURE_DELAY_MS = 20000;
       const LOG_POLLING_INTERVAL_MS = 500;
 
-      function displayProxyLogs(logs) {
+      function appendNewProxyLogs(logs) {
         const logEl = document.getElementById("test-log");
-        logEl.innerHTML = "";
 
-        logs.forEach((entry) => {
+        // Only append logs we haven't displayed yet
+        const newLogs = logs.slice(displayedLogCount);
+
+        newLogs.forEach((entry) => {
           const backend = entry.backend || "unknown";
           const status = entry.status;
           const latency = entry.latencyMs || 0;
@@ -619,6 +621,7 @@
           logEl.innerHTML += `<div class="log-entry ${className}">${message}</div>`;
         });
 
+        displayedLogCount = logs.length;
         logEl.scrollTop = logEl.scrollHeight;
       }
 
@@ -626,12 +629,11 @@
         if (!isRunning) return;
 
         try {
-          const res = await fetch(`${BASE_URL}/logs?limit=100`);
+          const res = await fetch(`${BASE_URL}/logs?limit=1000`);
           const data = await res.json();
 
-          if (data.logs && data.logs.length > lastLogCount) {
-            displayProxyLogs(data.logs);
-            lastLogCount = data.logs.length;
+          if (data.logs && data.logs.length > displayedLogCount) {
+            appendNewProxyLogs(data.logs);
           }
         } catch (error) {
           console.error("Failed to poll logs:", error);
@@ -766,7 +768,7 @@
         if (isRunning) return;
 
         stopTimers();
-        lastLogCount = 0;
+        displayedLogCount = 0;
         document.getElementById("test-log").innerHTML = "";
         document.getElementById("metrics-section").style.display = "none";
 

@@ -128,7 +128,7 @@ app.get("/api", async (req, res) => {
     // Mise à jour métrique T_bascule
     if (tFail !== null && tFirstSpare200 === null && backend === "spare" && status === 200) {
       tFirstSpare200 = Date.now();
-      console.log(`[${SERVER_NAME}] First successful spare response! T_bascule = ${tFirstSpare200 - tFail}ms`);
+      console.log(`[${SERVER_NAME}] First successful spare response! T_bascule = ${tFirstSpare200 - tFail}ms at timestamp ${tFirstSpare200}`);
     }
 
     res.status(status).json(body);
@@ -157,11 +157,11 @@ app.get("/api", async (req, res) => {
 app.post("/inject-failure", async (req, res) => {
   const mode = req.body.mode || "timeout";
 
-  console.log(`[${SERVER_NAME}] Injecting failure on primary (mode: ${mode})`);
-
   // Enregistrer le timestamp de la panne
   tFail = Date.now();
   tFirstSpare200 = null;  // Reset
+
+  console.log(`[${SERVER_NAME}] Injecting failure on primary (mode: ${mode}) at timestamp ${tFail}`);
 
   try {
     // Appeler le primary pour déclencher la panne
