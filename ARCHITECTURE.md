@@ -5,14 +5,15 @@
 ```
 projet-1/
 ├── primary/          # Service primaire (port 3001)
-│   └── server.js     # À implémenter
+│   └── server.js
 ├── spare/            # Service de secours (port 3002)
-│   └── server.js     # À implémenter
+│   └── server.js
 ├── proxy/            # Point d'entrée et monitoring (port 3000)
-│   └── server.js     # À implémenter
+│   └── server.js
+├── public/           # Interface web
+│   └── test-client.html
 ├── loadtest/         # Tests de charge
-│   └── spam.js       # À implémenter
-├── src/              # Ancien code (référence Docker)
+│   └── spam.js
 ├── package.json      # Dépendances partagées
 └── README.md         # Documentation principale
 ```
@@ -20,35 +21,43 @@ projet-1/
 ## Architecture des services
 
 ### 1. PRIMARY (port 3001)
-- **Rôle**: Service principal qui peut simuler différents types de pannes
-- **État**: `failureMode` ∈ {none, error, timeout, crash}
+- **Rôle**: Service principal avec émission de heartbeats et simulation de crash
+- **État**: `failureMode` ∈ {none, crash}
+- **Heartbeat**: Envoie POST /heartbeat au proxy toutes les 1 seconde
 - **Endpoints**:
   - `GET /api` - API principale
-  - `GET /health` - Health check pour le monitoring
-  - `POST /fail` - Déclencher une panne
+  - `GET /status` - État actuel
+  - `POST /fail` - Déclencher un crash
   - `POST /recover` - Récupérer après panne
 
 ### 2. SPARE (port 3002)
 - **Rôle**: Service de secours (warm spare) toujours disponible
 - **État**: Toujours sain
 - **Endpoints**:
-  - `GET /api` - API de secours
-  - `GET /health` - Health check (toujours 200)
+  - `GET /api` - API de secours (toujours 200)
+  - `GET /status` - État actuel
 
 ### 3. PROXY (port 3000)
-- **Rôle**: Point d'entrée unique + détection de panne + routage
+- **Rôle**: Point d'entrée unique + réception heartbeat + routage
 - **Tactiques implémentées**:
-  - **Ping/Echo**: Monitoring actif du primary (500ms)
+  - **Heartbeat**: Réception passive des heartbeats du primary
   - **Redundant Spare**: Bascule automatique vers spare
 - **Endpoints**:
-  - `GET /api` - Route vers primary ou spare
+  - `GET /api` - Route vers primary ou spare selon heartbeat
   - `GET /metrics` - Métriques T_bascule et E_bascule
-  - `POST /inject-failure` - Déclencher panne via proxy
-  - `POST /recover-primary` - Récupérer le primary
+  - `GET /logs?limit=N` - Historique des requêtes
+  - `POST /heartbeat?from=X` - Recevoir heartbeat (appelé par primary)
+  - `POST /inject-failure` - Déclencher crash du primary
 
-### 4. LOADTEST
+### 4. UI WEB (http://localhost:3000/test-client.html)
+- **Rôle**: Interface de test et démonstration
+- **Onglets**:
+  - **API Explorer**: Tester manuellement les endpoints
+  - **Load Test**: Test automatisé avec visualisation
+
+### 5. LOADTEST
 - **Rôle**: Générateur de charge pour mesurer E_bascule
-- **Comportement**: 10 req/sec pendant 20-30 secondes
+- **Comportement**: 25 req/sec pendant 30 secondes, crash à 10s
 
 ## Métriques mesurées
 
@@ -67,12 +76,31 @@ E_bascule = (nombre d'erreurs / total requêtes) dans la fenêtre
 
 ## Configuration
 
+### Proxy (proxy/server.js)
 | Paramètre | Valeur | Description |
 |-----------|--------|-------------|
-| CHECK_INTERVAL_MS | 500 | Intervalle de ping/echo |
-| HEALTH_TIMEOUT_MS | 400 | Timeout pour health check |
+| HEARTBEAT_TIMEOUT_MS | 4000 | Temps sans heartbeat avant de marquer DOWN |
+| CHECK_HEARTBEAT_INTERVAL_MS | 500 | Intervalle de vérification des heartbeats |
 | WINDOW_BEFORE_MS | 2000 | Fenêtre avant panne pour E_bascule |
 | WINDOW_AFTER_MS | 10000 | Fenêtre après panne pour E_bascule |
+
+### Primary (primary/server.js)
+| Paramètre | Valeur | Description |
+|-----------|--------|-------------|
+| HEARTBEAT_INTERVAL_MS | 1000 | Fréquence d'envoi des heartbeats |
+
+## Flux de communication
+
+```
+PRIMARY (3001)  ----[heartbeat POST toutes les 1s]----> PROXY (3000)
+                                                            |
+                                                            | [vérifie fraîcheur]
+                                                            | [si > 4s: DOWN]
+                                                            |
+Client --------[GET /api]-------> PROXY --------> PRIMARY (si heartbeat OK)
+                                    |
+                                    |----[si pas de heartbeat]----> SPARE (3002)
+```
 
 ## Procédure de démo
 
@@ -83,36 +111,64 @@ E_bascule = (nombre d'erreurs / total requêtes) dans la fenêtre
    npm run dev:proxy
    ```
 
-2. **Tester le routage initial**:
+2. **Observer les heartbeats**:
+   - Dans le terminal du proxy, vous verrez: `[proxy] Received heartbeat from primary at timestamp X`
+
+3. **Tester le routage initial**:
    ```bash
    curl http://localhost:3000/api
    # Devrait retourner node:"primary"
    ```
 
-3. **Lancer le load test**:
+4. **Option A - UI Web**:
+   - Ouvrir http://localhost:3000/test-client.html
+   - Aller dans l'onglet "Load Test"
+   - Cliquer "Start Test"
+   - Utiliser "Inject Failure" pour déclencher manuellement
+
+5. **Option B - Script terminal**:
    ```bash
    npm run load
    ```
 
-4. **Déclencher la panne**:
-   ```bash
-   curl -X POST http://localhost:3000/inject-failure
-   ```
-
-5. **Observer les métriques**:
+6. **Observer les métriques**:
    ```bash
    curl http://localhost:3000/metrics
    ```
 
-## Notes de migration depuis src/
+7. **Redémarrer le primary**:
+   ```bash
+   # Dans le terminal du primary (après crash)
+   npm run dev:primary
+   ```
 
-L'ancien code dans `src/` utilisait Docker avec:
-- Ports: 8080 (failover), 3001 (primary), 3002 (spare)
-- Docker Compose pour orchestration
-- Logique similaire mais endpoints différents
+## Détection de panne (Heartbeat)
 
-Le nouveau code utilise:
-- Architecture localhost sans Docker
-- Ports: 3000 (proxy), 3001 (primary), 3002 (spare)
-- Endpoints standardisés selon plan académique
-- Métriques T_bascule et E_bascule intégrées
+### Principe
+Le primary envoie activement un signal de vie au proxy toutes les secondes. Le proxy surveille passivement la fraîcheur de ces signaux.
+
+### Détail du mécanisme
+
+1. **Émission (PRIMARY)**:
+   - Toutes les 1 seconde: `POST /heartbeat?from=primary` vers le proxy
+   - S'arrête automatiquement si le processus crashe
+
+2. **Réception (PROXY)**:
+   - Enregistre le timestamp de chaque heartbeat reçu
+   - Log: `"Received heartbeat from primary at timestamp X"`
+
+3. **Surveillance (PROXY)**:
+   - Toutes les 500ms: vérifie l'âge du dernier heartbeat
+   - Si `(now - lastHeartbeat) > 4000ms`: marque primary comme DOWN
+   - Log: `"Primary is DOWN (no heartbeat for Xms)"`
+
+4. **Bascule (PROXY)**:
+   - Dès que primary DOWN: route toutes les requêtes vers spare
+   - Transparente pour les clients
+
+## Notes
+
+- Le système utilise une architecture localhost sans Docker
+- Les heartbeats s'arrêtent automatiquement en cas de crash
+- Le spare est un warm spare (toujours démarré et prêt)
+- Les métriques T_bascule et E_bascule sont calculées automatiquement
